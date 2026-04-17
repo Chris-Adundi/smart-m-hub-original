@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 215 28% 7%;
+    --foreground: 210 40% 92%;
+    --card: 215 25% 12%;
+    --card-foreground: 210 40% 92%;
+    --popover: 215 25% 12%;
+    --popover-foreground: 210 40% 92%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 20% 16%;
+    --secondary-foreground: 210 40% 92%;
+    --muted: 215 20% 16%;
+    --muted-foreground: 215 20% 60%;
+    --accent: 160 84% 39%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 20% 18%;
+    --input: 215 25% 14%;
+    --ring: 160 84% 39%;
+    --radius: 0.75rem;
+    --chart-1: 160 84% 39%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 43 96% 56%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 349 65% 52%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Inter', sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', sans-serif;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Custom dark theme utilities */
+.glass-card {
+  background: rgba(17, 25, 40, 0.75);
+  border: 1px solid rgba(45, 212, 191, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.1), 0 0 20px rgba(16, 185, 129, 0.05);
+}
+
+.glow-border-active {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3), 0 0 30px rgba(16, 185, 129, 0.1);
+}
+
+/* Hide Emergent branding */
+div[class*="emergent"],
+div[id*="emergent"],
+a[href*="emergent"],
+button[class*="emergent"],
+[data-emergent],
+div:has(> a[href*="emergent.sh"]),
+#emergent-badge,
+.emergent-badge,
+[class*="made-with"],
+[id*="made-with"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  left: -9999px !important;
+}
+
+button[style*="position: fixed"][style*="bottom"],
+div[style*="position: fixed"][style*="bottom"][style*="right"],
+a[style*="position: fixed"][style*="bottom"] {
+  display: none !important;
+}
