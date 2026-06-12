@@ -32,22 +32,26 @@ let webpackConfig = {
       },
     },
   },
+
   webpack: {
-    alias: {
-      '@': path.resolve(__dirname, 'src'),
-    },
     configure: (webpackConfig) => {
 
+      // ✅ FIXED ALIAS (THIS IS THE IMPORTANT PART)
+      webpackConfig.resolve.alias = {
+        ...(webpackConfig.resolve.alias || {}),
+        "@": path.resolve(__dirname, "src"),
+      };
+
       // Add ignored patterns to reduce watched directories
-        webpackConfig.watchOptions = {
-          ...webpackConfig.watchOptions,
-          ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          "**/node_modules/**",
+          "**/.git/**",
+          "**/build/**",
+          "**/dist/**",
+          "**/coverage/**",
+          "**/public/**",
         ],
       };
 
@@ -55,6 +59,7 @@ let webpackConfig = {
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
+
       return webpackConfig;
     },
   },
@@ -66,14 +71,11 @@ webpackConfig.devServer = (devServerConfig) => {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
 
     devServerConfig.setupMiddlewares = (middlewares, devServer) => {
-      // Call original setup if exists
       if (originalSetupMiddlewares) {
         middlewares = originalSetupMiddlewares(middlewares, devServer);
       }
 
-      // Setup health endpoints
       setupHealthEndpoints(devServer, healthPluginInstance);
-
       return middlewares;
     };
   }
@@ -87,7 +89,10 @@ if (isDevServer) {
     const { withVisualEdits } = require("@emergentbase/visual-edits/craco");
     webpackConfig = withVisualEdits(webpackConfig);
   } catch (err) {
-    if (err.code === 'MODULE_NOT_FOUND' && err.message.includes('@emergentbase/visual-edits/craco')) {
+    if (
+      err.code === "MODULE_NOT_FOUND" &&
+      err.message.includes("@emergentbase/visual-edits/craco")
+    ) {
       console.warn(
         "[visual-edits] @emergentbase/visual-edits not installed — visual editing disabled."
       );

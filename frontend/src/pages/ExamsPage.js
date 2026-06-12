@@ -1,314 +1,613 @@
-import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
 import { Button } from "@/components/ui/button";
+
 import { Input } from "@/components/ui/input";
+
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { apiClient } from "@/App";
+
 import { toast } from "sonner";
-import { Plus, FileText, Calendar } from "lucide-react";
+
+import {
+  Plus,
+  FileText,
+  Calendar,
+  ClipboardList,
+} from "lucide-react";
+
 import jsPDF from "jspdf";
 
+// ======================
+// DEFAULT FORM
+// ======================
+const defaultForm = {
+  name: "",
+  class_name: "",
+  year_of_study: "",
+  term: "Term 1",
+  exam_number: "Exam 1",
+  academic_year: new Date().getFullYear().toString(),
+  exam_date: "",
+};
+
+// ======================
+// COMPONENT
+// ======================
 const ExamsPage = () => {
   const [exams, setExams] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [resultsDialogOpen, setResultsDialogOpen] = useState(false);
-  const [selectedExam, setSelectedExam] = useState(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    class_name: "",
-    year_of_study: "",
-    term: "Term 1",
-    exam_number: "Exam 1",
-    academic_year: new Date().getFullYear().toString(),
-    exam_date: ""
-  });
 
+  const [loading, setLoading] = useState(true);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const [submitting, setSubmitting] = useState(false);
+
+  const [formData, setFormData] = useState(defaultForm);
+
+  // ======================
+  // OPTIONS
+  // ======================
   const kenyaClasses = [
-    "PP1", "PP2", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6",
-    "Grade 7", "Grade 8", "Grade 9", "Grade 10", "Grade 11", "Grade 12"
+    "PP1",
+    "PP2",
+    "Grade 1",
+    "Grade 2",
+    "Grade 3",
+    "Grade 4",
+    "Grade 5",
+    "Grade 6",
+    "Grade 7",
+    "Grade 8",
+    "Grade 9",
+    "Grade 10",
+    "Grade 11",
+    "Grade 12",
   ];
 
-  const collegeYears = ["Year 1", "Year 2", "Year 3", "Year 4", "Year 5", "Year 6"];
+  const collegeYears = [
+    "Year 1",
+    "Year 2",
+    "Year 3",
+    "Year 4",
+    "Year 5",
+    "Year 6",
+  ];
 
-  useEffect(() => {
-    fetchExams();
-  }, []);
+  // ======================
+  // UPDATE FORM
+  // ======================
+  const update = (key, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
 
+  // ======================
+  // FETCH EXAMS
+  // ======================
   const fetchExams = async () => {
     try {
+      setLoading(true);
+
       const response = await apiClient.get("/exams");
-      setExams(response.data);
+
+      const data = response?.data;
+
+      if (Array.isArray(data)) {
+        setExams(data);
+      } else if (Array.isArray(data?.items)) {
+        setExams(data.items);
+      } else {
+        setExams([]);
+      }
     } catch (error) {
+      console.error("FETCH EXAMS ERROR:", error);
+
       toast.error("Failed to fetch exams");
+
+      setExams([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // ======================
+  // INITIAL LOAD
+  // ======================
+  useEffect(() => {
+    fetchExams();
+  }, []);
+
+  // ======================
+  // CREATE EXAM
+  // ======================
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (submitting) return;
+
     try {
-      await apiClient.post("/exams", formData);
+      setSubmitting(true);
+
+      if (!formData.name?.trim()) {
+        toast.error("Exam name is required");
+        return;
+      }
+
+      if (!formData.exam_date) {
+        toast.error("Exam date is required");
+        return;
+      }
+
+      const payload = {
+        ...formData,
+        name: formData.name.trim(),
+      };
+
+      await apiClient.post("/exams", payload);
+
       toast.success("Exam created successfully");
+
       setDialogOpen(false);
-      fetchExams();
+
+      setFormData(defaultForm);
+
+      await fetchExams();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to create exam");
+      console.error("CREATE EXAM ERROR:", error);
+
+      toast.error(
+        error?.response?.data?.detail ||
+          "Failed to create exam"
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  // ======================
+  // PDF REPORT
+  // ======================
   const generateReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text("Smart Hub - Exam Report", 20, 20);
-    doc.setFontSize(12);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 20, 30);
-    doc.text(`Academic Year: ${formData.academic_year}`, 20, 40);
-    
-    let y = 60;
-    doc.setFontSize(14);
-    doc.text("All Exams", 20, y);
-    y += 10;
-    
-    doc.setFontSize(10);
-    exams.forEach((exam, index) => {
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
+    try {
+      const doc = new jsPDF();
+
+      doc.setFontSize(18);
+
+      doc.text("Exams Report", 20, 20);
+
+      doc.setFontSize(12);
+
+      let y = 40;
+
+      if (exams.length === 0) {
+        doc.text("No exams available", 20, y);
+      } else {
+        exams.forEach((exam, index) => {
+          const line = `
+${index + 1}. ${exam?.name || "Unnamed Exam"}
+Class: ${exam?.class_name || "-"}
+Term: ${exam?.term || "-"}
+Date: ${exam?.exam_date || "-"}
+          `;
+
+          doc.text(line, 20, y);
+
+          y += 28;
+
+          if (y > 260) {
+            doc.addPage();
+            y = 20;
+          }
+        });
       }
-      doc.text(`${index + 1}. ${exam.name}`, 20, y);
-      y += 5;
-      doc.text(`   Class: ${exam.class_name || exam.year_of_study} | Term: ${exam.term} | Exam: ${exam.exam_number}`, 20, y);
-      y += 5;
-      doc.text(`   Date: ${new Date(exam.exam_date).toLocaleDateString()}`, 20, y);
-      y += 10;
-    });
-    
-    doc.save(`exam-report-${Date.now()}.pdf`);
-    toast.success("Report downloaded");
+
+      doc.save("exam-report.pdf");
+
+      toast.success("Report generated");
+    } catch (error) {
+      console.error("PDF ERROR:", error);
+
+      toast.error("Failed to generate report");
+    }
   };
 
-  const groupedExams = exams.reduce((acc, exam) => {
-    const key = `${exam.academic_year}-${exam.term}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(exam);
-    return acc;
-  }, {});
+  // ======================
+  // GROUP EXAMS
+  // ======================
+  const groupedExams = useMemo(() => {
+    return exams.reduce((acc, exam) => {
+      const year =
+        exam?.academic_year || "Unknown Year";
 
+      const term = exam?.term || "Unknown Term";
+
+      const key = `${year} - ${term}`;
+
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+
+      acc[key].push(exam);
+
+      return acc;
+    }, {});
+  }, [exams]);
+
+  // ======================
+  // LOADING
+  // ======================
+  if (loading) {
+    return (
+      <div className="p-6 text-slate-400">
+        Loading exams...
+      </div>
+    );
+  }
+
+  // ======================
+  // UI
+  // ======================
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+
+      {/* ======================
+          HEADER
+      ====================== */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
         <div>
-          <h2 className="text-3xl font-bold text-white">Performance & Assessments</h2>
-          <p className="text-slate-400 mt-1">Manage examinations using CBE grading (EE, ME, AE, BE)</p>
+          <h2 className="text-3xl font-bold text-white">
+            Exams
+          </h2>
+
+          <p className="text-slate-400">
+            Manage assessments and exam records
+          </p>
         </div>
-        <div className="flex gap-2">
+
+        <div className="flex flex-wrap gap-2">
+
+          {/* REPORT */}
           <Button
-            variant="outline"
             onClick={generateReport}
-            data-testid="download-report-btn"
+            variant="outline"
           >
             <FileText className="w-4 h-4 mr-2" />
-            Download Report
+            Generate Report
           </Button>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+
+          {/* CREATE */}
+          <Dialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+          >
+
             <DialogTrigger asChild>
-              <Button data-testid="create-exam-btn">
+              <Button>
                 <Plus className="w-4 h-4 mr-2" />
                 Create Exam
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+
+            <DialogContent className="sm:max-w-lg">
+
               <DialogHeader>
-                <DialogTitle>Create New Exam</DialogTitle>
+                <DialogTitle>
+                  Create New Exam
+                </DialogTitle>
               </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
+
+              <form
+                onSubmit={handleSubmit}
+                className="space-y-4"
+              >
+
+                {/* EXAM NAME */}
                 <div className="space-y-2">
-                  <Label>Exam Name *</Label>
+                  <Label htmlFor="exam_name">
+                    Exam Name
+                  </Label>
+
                   <Input
-                    data-testid="exam-name-input"
-                    placeholder="Mid-Term Mathematics Exam"
+                    id="exam_name"
+                    placeholder="e.g Mid Term Exam"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) =>
+                      update("name", e.target.value)
+                    }
                     required
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+
+                {/* CLASS + YEAR */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
                   <div className="space-y-2">
-                    <Label>Class (Primary/Secondary)</Label>
+                    <Label>
+                      Class
+                    </Label>
+
                     <Select
                       value={formData.class_name}
-                      onValueChange={(value) => setFormData({ ...formData, class_name: value, year_of_study: "" })}
+                      onValueChange={(value) =>
+                        update("class_name", value)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select class" />
                       </SelectTrigger>
+
                       <SelectContent>
-                        {kenyaClasses.map((cls) => (
-                          <SelectItem key={cls} value={cls}>{cls}</SelectItem>
+                        {kenyaClasses.map((item) => (
+                          <SelectItem
+                            key={item}
+                            value={item}
+                          >
+                            {item}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
-                    <Label>Year (College/University)</Label>
+                    <Label>
+                      Year of Study
+                    </Label>
+
                     <Select
                       value={formData.year_of_study}
-                      onValueChange={(value) => setFormData({ ...formData, year_of_study: value, class_name: "" })}
+                      onValueChange={(value) =>
+                        update("year_of_study", value)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select year" />
                       </SelectTrigger>
+
                       <SelectContent>
-                        {collegeYears.map((year) => (
-                          <SelectItem key={year} value={year}>{year}</SelectItem>
+                        {collegeYears.map((item) => (
+                          <SelectItem
+                            key={item}
+                            value={item}
+                          >
+                            {item}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
+
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+
+                {/* TERM + EXAM */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
                   <div className="space-y-2">
-                    <Label>Term *</Label>
+                    <Label>
+                      Term
+                    </Label>
+
                     <Select
                       value={formData.term}
-                      onValueChange={(value) => setFormData({ ...formData, term: value })}
+                      onValueChange={(value) =>
+                        update("term", value)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
+
                       <SelectContent>
-                        <SelectItem value="Term 1">Term 1</SelectItem>
-                        <SelectItem value="Term 2">Term 2</SelectItem>
-                        <SelectItem value="Term 3">Term 3</SelectItem>
+                        <SelectItem value="Term 1">
+                          Term 1
+                        </SelectItem>
+
+                        <SelectItem value="Term 2">
+                          Term 2
+                        </SelectItem>
+
+                        <SelectItem value="Term 3">
+                          Term 3
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
-                    <Label>Exam Number *</Label>
+                    <Label>
+                      Exam Number
+                    </Label>
+
                     <Select
                       value={formData.exam_number}
-                      onValueChange={(value) => setFormData({ ...formData, exam_number: value })}
+                      onValueChange={(value) =>
+                        update("exam_number", value)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
+
                       <SelectContent>
-                        <SelectItem value="Exam 1">Exam 1</SelectItem>
-                        <SelectItem value="Exam 2">Exam 2</SelectItem>
-                        <SelectItem value="Exam 3">Exam 3</SelectItem>
+                        <SelectItem value="Exam 1">
+                          Exam 1
+                        </SelectItem>
+
+                        <SelectItem value="Exam 2">
+                          Exam 2
+                        </SelectItem>
+
+                        <SelectItem value="Exam 3">
+                          Exam 3
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Academic Year *</Label>
-                    <Input
-                      type="number"
-                      value={formData.academic_year}
-                      onChange={(e) => setFormData({ ...formData, academic_year: e.target.value })}
-                      required
-                    />
-                  </div>
+
                 </div>
+
+                {/* DATE */}
                 <div className="space-y-2">
-                  <Label>Exam Date *</Label>
+                  <Label htmlFor="exam_date">
+                    Exam Date
+                  </Label>
+
                   <Input
+                    id="exam_date"
                     type="date"
                     value={formData.exam_date}
-                    onChange={(e) => setFormData({ ...formData, exam_date: e.target.value })}
+                    onChange={(e) =>
+                      update("exam_date", e.target.value)
+                    }
                     required
                   />
                 </div>
-                <Button data-testid="submit-exam-btn" type="submit" className="w-full">
-                  Create Exam
+
+                {/* SAVE */}
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={submitting}
+                >
+                  {submitting
+                    ? "Saving..."
+                    : "Save Exam"}
                 </Button>
+
               </form>
+
             </DialogContent>
+
           </Dialog>
+
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* ======================
+          EMPTY STATE
+      ====================== */}
+      {exams.length === 0 && (
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Total Exams</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">{exams.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Current Year</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">
-              {exams.filter(e => e.academic_year === new Date().getFullYear().toString()).length}
+
+          <CardContent className="py-10">
+
+            <div className="flex flex-col items-center justify-center text-center">
+
+              <ClipboardList className="w-12 h-12 text-slate-500 mb-4" />
+
+              <h3 className="text-lg font-semibold text-white">
+                No Exams Yet
+              </h3>
+
+              <p className="text-slate-400 mt-1">
+                Create your first exam to get started
+              </p>
+
             </div>
+
           </CardContent>
+
         </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-slate-600">Active Terms</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-slate-900">
-              {new Set(exams.map(e => e.term)).size}
-            </div>
-          </CardContent>
-        </Card>
+      )}
+
+      {/* ======================
+          EXAMS LIST
+      ====================== */}
+      <div className="space-y-4">
+
+        {Object.entries(groupedExams).map(
+          ([groupKey, list]) => (
+
+            <Card key={groupKey}>
+
+              <CardHeader>
+
+                <CardTitle className="flex items-center gap-2">
+
+                  <Calendar className="w-4 h-4" />
+
+                  {groupKey}
+
+                </CardTitle>
+
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+
+                {list.map((exam, index) => (
+
+                  <div
+                    key={exam?.id || index}
+                    className="border border-slate-700 rounded-lg p-4 bg-slate-900/40"
+                  >
+
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+
+                      <div>
+
+                        <h4 className="font-semibold text-white">
+                          {exam?.name || "Unnamed Exam"}
+                        </h4>
+
+                        <p className="text-sm text-slate-400 mt-1">
+
+                          {exam?.class_name || "No Class"}
+
+                          {" • "}
+
+                          {exam?.exam_number || "Exam"}
+
+                        </p>
+
+                      </div>
+
+                      <div className="text-sm text-slate-400">
+                        {exam?.exam_date || "No Date"}
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                ))}
+
+              </CardContent>
+
+            </Card>
+
+          )
+        )}
+
       </div>
 
-      {loading ? (
-        <Card>
-          <CardContent className="py-12 text-center">Loading...</CardContent>
-        </Card>
-      ) : Object.keys(groupedExams).length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-slate-500">
-            No exams found. Create your first exam to get started.
-          </CardContent>
-        </Card>
-      ) : (
-        Object.entries(groupedExams).map(([key, examList]) => (
-          <Card key={key}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                {key.split('-')[1]} - Academic Year {key.split('-')[0]}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {examList.map((exam) => (
-                  <div
-                    key={exam.id}
-                    data-testid="exam-card"
-                    className="p-4 border border-slate-200 rounded-lg hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-semibold text-lg text-slate-900">{exam.name}</h3>
-                        <p className="text-sm text-slate-600 mt-1">
-                          {exam.class_name || exam.year_of_study} | {exam.exam_number} | 
-                          {new Date(exam.exam_date).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <Button variant="outline" size="sm">
-                        View Results
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))
-      )}
     </div>
   );
 };

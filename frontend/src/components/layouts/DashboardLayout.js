@@ -1,99 +1,271 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
+
 import { authService } from "@/App";
 import { Button } from "@/components/ui/button";
+
 import {
-  LayoutDashboard, Users, UsersRound, CreditCard, CalendarCheck,
-  GraduationCap, Calendar, Package, LogOut, Menu, X, Building2, Bell, User, FileText
+  LayoutDashboard,
+  Users,
+  UsersRound,
+  CreditCard,
+  CalendarCheck,
+  GraduationCap,
+  Calendar,
+  Package,
+  LogOut,
+  Menu,
+  X,
+  Bell,
+  User,
+  FileText,
+  ShieldCheck,
+  Shield,
+  Building2,
 } from "lucide-react";
+
+// =========================
+// MENU ITEMS
+// =========================
+const MENU_ITEMS = [
+  {
+    icon: LayoutDashboard,
+    label: "Dashboard",
+    path: "/app/dashboard",
+    roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "FINANCE", "SECRETARY"],
+  },
+  {
+    icon: ShieldCheck,
+    label: "Super Admin",
+    path: "/app/super-admin",
+    roles: ["SUPER_ADMIN"],
+  },
+  {
+    icon: Shield,
+    label: "Login Portal",
+    path: "/app/login-portal",
+    roles: ["SCHOOL_ADMIN"],
+  },
+
+  // ✅ FIX ADDED HERE
+  {
+    icon: Building2,
+    label: "School Profile",
+    path: "/app/school-profile",
+    roles: ["SCHOOL_ADMIN"],
+  },
+
+  {
+    icon: Users,
+    label: "Students",
+    path: "/app/students",
+    roles: ["SCHOOL_ADMIN", "SECRETARY", "TEACHER"],
+  },
+  {
+    icon: UsersRound,
+    label: "Staff",
+    path: "/app/staff",
+    roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"],
+  },
+  {
+    icon: CreditCard,
+    label: "Fees",
+    path: "/app/fees",
+    roles: ["SCHOOL_ADMIN", "FINANCE"],
+  },
+  {
+    icon: CalendarCheck,
+    label: "Attendance",
+    path: "/app/attendance",
+    roles: ["SCHOOL_ADMIN", "TEACHER", "SECRETARY"],
+  },
+  {
+    icon: GraduationCap,
+    label: "Exams & Results",
+    path: "/app/exams",
+    roles: ["SCHOOL_ADMIN", "TEACHER"],
+  },
+  {
+    icon: Calendar,
+    label: "Timetable",
+    path: "/app/timetable",
+    roles: ["SCHOOL_ADMIN", "TEACHER", "STUDENT"],
+  },
+  {
+    icon: Package,
+    label: "Inventory",
+    path: "/app/inventory",
+    roles: ["SCHOOL_ADMIN", "SECRETARY"],
+  },
+  {
+    icon: Bell,
+    label: "Announcements",
+    path: "/app/announcements",
+    roles: ["SCHOOL_ADMIN", "SECRETARY", "TEACHER", "FINANCE", "STUDENT"],
+  },
+  {
+    icon: User,
+    label: "Teacher Portal",
+    path: "/app/teacher-portal",
+    roles: ["TEACHER", "SCHOOL_ADMIN"],
+  },
+  {
+    icon: CreditCard,
+    label: "Finance Portal",
+    path: "/app/finance-portal",
+    roles: ["FINANCE", "SCHOOL_ADMIN"],
+  },
+  {
+    icon: FileText,
+    label: "Secretary Portal",
+    path: "/app/secretary-portal",
+    roles: ["SECRETARY", "SCHOOL_ADMIN"],
+  },
+  {
+    icon: User,
+    label: "Student Portal",
+    path: "/app/student-portal",
+    roles: ["STUDENT"],
+  },
+];
+
+// =========================
+// ROLE NORMALIZER
+// =========================
+const normalizeRole = (role) => {
+  if (!role) return "";
+
+  const r = String(role).trim().toUpperCase();
+
+  const map = {
+    ADMIN: "SCHOOL_ADMIN",
+    SCHOOLADMIN: "SCHOOL_ADMIN",
+    SCHOOL_ADMIN: "SCHOOL_ADMIN",
+
+    SUPERADMIN: "SUPER_ADMIN",
+    SUPER_ADMIN: "SUPER_ADMIN",
+
+    TEACHER: "TEACHER",
+    FINANCE: "FINANCE",
+    SECRETARY: "SECRETARY",
+    STUDENT: "STUDENT",
+    PARENT: "STUDENT",
+  };
+
+  return map[r] || r;
+};
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const user = authService.getUser();
 
-  const handleLogout = () => {
+  const rawUser = authService.getUser();
+
+  const user = useMemo(() => {
+    if (!rawUser) return null;
+
+    return {
+      ...rawUser,
+      role: normalizeRole(rawUser.role),
+    };
+  }, [rawUser]);
+
+  const role = user?.role || "";
+
+  const handleLogout = useCallback(() => {
     authService.clearAuth();
-    navigate("/login");
-  };
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
-  const menuItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/", roles: ["super_admin", "school_admin", "teacher", "finance", "secretary"] },
-    { icon: Building2, label: "Super Admin", path: "/super-admin", roles: ["super_admin"] },
-    { icon: Building2, label: "School Profile", path: "/school-profile", roles: ["school_admin"] },
-    { icon: Users, label: "Students", path: "/students", roles: ["school_admin", "teacher"] },
-    { icon: UsersRound, label: "Staff", path: "/staff", roles: ["school_admin"] },
-    { icon: CreditCard, label: "Fees", path: "/fees", roles: ["school_admin", "finance"] },
-    { icon: CalendarCheck, label: "Attendance", path: "/attendance", roles: ["school_admin", "teacher"] },
-    { icon: GraduationCap, label: "Performance", path: "/exams", roles: ["school_admin", "teacher"] },
-    { icon: Bell, label: "Announcements", path: "/announcements", roles: ["school_admin", "teacher", "secretary"] },
-    { icon: User, label: "Teacher Portal", path: "/teacher-portal", roles: ["teacher"] },
-    { icon: CreditCard, label: "Finance Portal", path: "/finance-portal", roles: ["finance"] },
-    { icon: FileText, label: "Secretary Portal", path: "/secretary-portal", roles: ["secretary"] },
-    { icon: User, label: "Student Portal", path: "/student-portal", roles: ["parent", "student"] },
-    { icon: Calendar, label: "Timetable", path: "/timetable", roles: ["school_admin", "teacher"] },
-    { icon: Package, label: "Inventory", path: "/inventory", roles: ["school_admin"] },
-  ];
+  const isActive = useCallback(
+    (path) =>
+      location.pathname === path ||
+      location.pathname.startsWith(`${path}/`),
+    [location.pathname]
+  );
 
-  const visibleItems = menuItems.filter(item => item.roles.includes(user?.role));
+  const visibleItems = useMemo(() => {
+    if (!role) return [];
+    return MENU_ITEMS.filter((item) => item.roles.includes(role));
+  }, [role]);
+
+  if (!user || !role) {
+    return (
+      <div className="min-h-screen bg-[#0B1220] flex items-center justify-center text-white">
+        <Button onClick={handleLogout}>
+          Session expired. Login again
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-screen bg-[#0B1120]">
-      {/* Sidebar */}
+    <div className="flex h-screen bg-[#0B1220] text-slate-200 overflow-hidden">
+
+      {/* SIDEBAR */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#111827] border-r border-[#1E293B] transform transition-transform duration-200 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#0F172A] border-r border-white/5 transition-transform duration-300 flex flex-col ${
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        {/* Logo */}
-        <div className="h-16 flex items-center justify-between px-5 border-b border-[#1E293B]">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center shadow-lg shadow-emerald-600/20">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-lg font-bold text-white tracking-tight">Smart-M Hub</span>
+
+        {/* HEADER */}
+        <div className="h-16 flex items-center justify-between px-5 border-b border-white/5">
+          <div>
+            <p className="text-white font-semibold text-sm">
+              Smart-M Hub
+            </p>
+            <p className="text-[11px] text-slate-500 uppercase">
+              {role.replace("_", " ")}
+            </p>
           </div>
-          <button className="lg:hidden text-slate-400 hover:text-white" onClick={() => setSidebarOpen(false)} data-testid="close-sidebar-btn">
-            <X className="w-5 h-5" />
+
+          <button
+            className="lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <X />
           </button>
         </div>
 
-        {/* Nav */}
-        <nav className="p-3 space-y-1 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
-          {visibleItems.map(item => {
+        {/* MENU */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+          {visibleItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                data-testid={`nav-${item.label.toLowerCase().replace(/[\s/]/g, "-")}`}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
-                  isActive
-                    ? "bg-emerald-600/15 text-emerald-400 border border-emerald-500/20"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-[#1A2332] border border-transparent"
-                }`}
                 onClick={() => setSidebarOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm ${
+                  isActive(item.path)
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : "text-slate-400 hover:text-white"
+                }`}
               >
-                <Icon className="w-[18px] h-[18px]" strokeWidth={1.8} />
-                <span className="font-medium">{item.label}</span>
+                <Icon className="w-4 h-4" />
+                {item.label}
               </Link>
             );
           })}
         </nav>
 
-        {/* User info */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-[#1E293B]">
-          <div className="mb-3 px-1">
-            <p className="text-sm font-medium text-white truncate">{user?.full_name}</p>
-            <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+        {/* USER */}
+        <div className="p-4 border-t border-white/5 space-y-3">
+          <div>
+            <p className="text-white text-sm">{user.full_name}</p>
+            <p className="text-xs text-slate-500">{user.email}</p>
           </div>
+
           <Button
             variant="ghost"
-            className="w-full justify-start text-slate-400 hover:text-red-400 hover:bg-red-500/10"
             onClick={handleLogout}
-            data-testid="logout-btn"
+            className="w-full justify-start"
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout
@@ -101,24 +273,30 @@ const DashboardLayout = () => {
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 bg-[#111827] border-b border-[#1E293B] flex items-center justify-between px-5 lg:px-8 gap-4">
-          <button className="lg:hidden flex-shrink-0 text-slate-400 hover:text-white" onClick={() => setSidebarOpen(true)} data-testid="open-sidebar-btn">
-            <Menu className="w-5 h-5" />
+      {/* MAIN */}
+      <div className="flex-1 flex flex-col">
+
+        <header className="h-14 border-b border-white/5 flex items-center justify-between px-4">
+          <button
+            className="lg:hidden"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu />
           </button>
-          <h1 className="text-sm lg:text-base font-medium text-slate-300 truncate flex-1">
-            Welcome, {user?.full_name}
-          </h1>
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
-              {user?.role?.replace("_", " ")}
-            </span>
+
+          <div className="text-sm text-slate-300">
+            Welcome, {user.full_name}
+          </div>
+
+          <div className="text-emerald-400 text-xs uppercase">
+            {role.replace("_", " ")}
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-5 lg:p-8">
+
+        <main className="flex-1 overflow-auto p-4">
           <Outlet />
         </main>
+
       </div>
     </div>
   );

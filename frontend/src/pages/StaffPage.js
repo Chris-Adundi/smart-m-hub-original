@@ -3,29 +3,52 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { apiClient } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
+
+const initialForm = {
+  full_name: "",
+  email: "",
+  phone: "",
+  employee_number: "",
+  department: "",
+  position: "",
+  role: "teacher",
+  password: "",
+  salary: "",
+  joined_date: "",
+};
 
 const StaffPage = () => {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    full_name: "",
-    email: "",
-    phone: "",
-    employee_number: "",
-    department: "",
-    position: "",
-    role: "teacher",
-    password: "",
-    salary: "",
-    joined_date: ""
-  });
+
+  const [formData, setFormData] = useState(initialForm);
 
   useEffect(() => {
     fetchStaff();
@@ -33,154 +56,254 @@ const StaffPage = () => {
 
   const fetchStaff = async () => {
     try {
+      setLoading(true);
+
       const response = await apiClient.get("/staff");
-      setStaff(response.data);
+
+      const staffData = response?.data?.data;
+
+      setStaff(Array.isArray(staffData) ? staffData : []);
     } catch (error) {
       toast.error("Failed to fetch staff");
+      setStaff([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const updateField = (field, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     try {
       await apiClient.post("/staff", formData);
+
       toast.success("Staff member added successfully");
+
       setDialogOpen(false);
+      setFormData(initialForm);
+
       fetchStaff();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to add staff");
+      toast.error(
+        error?.response?.data?.detail || "Failed to add staff"
+      );
     }
   };
 
+  const safeStaff = Array.isArray(staff) ? staff : [];
+
   return (
     <div className="space-y-6">
+
+      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold text-slate-900">Staff Management</h2>
-          <p className="text-slate-600 mt-1">Manage staff members and roles</p>
+          <h2 className="text-3xl font-bold text-slate-900">
+            Staff Management
+          </h2>
+          <p className="text-slate-600 mt-1">
+            Manage staff members and roles
+          </p>
         </div>
+
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button data-testid="add-staff-btn">
+            <Button>
               <Plus className="w-4 h-4 mr-2" />
               Add Staff
             </Button>
           </DialogTrigger>
+
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Staff Member</DialogTitle>
             </DialogHeader>
+
             <form onSubmit={handleSubmit} className="space-y-4">
+
+              {/* NAME + EMP NO */}
               <div className="grid grid-cols-2 gap-4">
+
                 <div className="space-y-2">
-                  <Label>Full Name</Label>
+                  <Label htmlFor="full_name">Full Name</Label>
                   <Input
-                    data-testid="staff-name-input"
+                    id="full_name"
+                    name="full_name"
                     value={formData.full_name}
-                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                    onChange={(e) =>
+                      updateField("full_name", e.target.value)
+                    }
                     required
                   />
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Employee Number</Label>
+                  <Label htmlFor="employee_number">
+                    Employee Number
+                  </Label>
                   <Input
+                    id="employee_number"
+                    name="employee_number"
                     value={formData.employee_number}
-                    onChange={(e) => setFormData({ ...formData, employee_number: e.target.value })}
+                    onChange={(e) =>
+                      updateField("employee_number", e.target.value)
+                    }
                     required
                   />
                 </div>
+
               </div>
+
+              {/* EMAIL + PHONE */}
               <div className="grid grid-cols-2 gap-4">
+
                 <div className="space-y-2">
-                  <Label>Email</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
+                    id="email"
+                    name="email"
                     type="email"
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    onChange={(e) =>
+                      updateField("email", e.target.value)
+                    }
                     required
                   />
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Phone</Label>
+                  <Label htmlFor="phone">Phone</Label>
                   <Input
+                    id="phone"
+                    name="phone"
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    onChange={(e) =>
+                      updateField("phone", e.target.value)
+                    }
                     required
                   />
                 </div>
+
               </div>
+
+              {/* DEPT + POSITION */}
               <div className="grid grid-cols-2 gap-4">
+
                 <div className="space-y-2">
-                  <Label>Department</Label>
+                  <Label htmlFor="department">Department</Label>
                   <Input
+                    id="department"
+                    name="department"
                     value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                    onChange={(e) =>
+                      updateField("department", e.target.value)
+                    }
                     required
                   />
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Position</Label>
+                  <Label htmlFor="position">Position</Label>
                   <Input
+                    id="position"
+                    name="position"
                     value={formData.position}
-                    onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                    onChange={(e) =>
+                      updateField("position", e.target.value)
+                    }
                     required
                   />
                 </div>
+
               </div>
+
+              {/* ROLE + DATE */}
               <div className="grid grid-cols-2 gap-4">
+
                 <div className="space-y-2">
                   <Label>Role</Label>
                   <Select
                     value={formData.role}
-                    onValueChange={(value) => setFormData({ ...formData, role: value })}
+                    onValueChange={(value) =>
+                      updateField("role", value)
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
+
                     <SelectContent>
                       <SelectItem value="teacher">Teacher</SelectItem>
-                      <SelectItem value="finance">Finance Officer</SelectItem>
-                      <SelectItem value="school_admin">School Admin</SelectItem>
+                      <SelectItem value="finance">
+                        Finance Officer
+                      </SelectItem>
+                      <SelectItem value="school_admin">
+                        School Admin
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Joined Date</Label>
+                  <Label htmlFor="joined_date">Joined Date</Label>
                   <Input
+                    id="joined_date"
+                    name="joined_date"
                     type="date"
                     value={formData.joined_date}
-                    onChange={(e) => setFormData({ ...formData, joined_date: e.target.value })}
+                    onChange={(e) =>
+                      updateField("joined_date", e.target.value)
+                    }
                     required
                   />
                 </div>
+
               </div>
+
+              {/* PASSWORD */}
               <div className="space-y-2">
-                <Label>Password</Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
+                  id="password"
+                  name="password"
                   type="password"
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  onChange={(e) =>
+                    updateField("password", e.target.value)
+                  }
                   required
                 />
               </div>
-              <Button data-testid="submit-staff-btn" type="submit" className="w-full">
+
+              <Button type="submit" className="w-full">
                 Add Staff Member
               </Button>
+
             </form>
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* TABLE */}
       <Card>
         <CardHeader>
           <CardTitle>Staff Members</CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="overflow-auto rounded-lg border border-slate-200">
+
             <Table>
+
               <TableHeader>
-                <TableRow className="bg-slate-50/50">
+                <TableRow>
                   <TableHead>Employee No.</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Department</TableHead>
@@ -188,33 +311,47 @@ const StaffPage = () => {
                   <TableHead>Phone</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
+
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">Loading...</TableCell>
+                    <TableCell colSpan={5} className="text-center py-8">
+                      Loading...
+                    </TableCell>
                   </TableRow>
-                ) : staff.length === 0 ? (
+
+                ) : safeStaff.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-8 text-slate-500">
                       No staff members found
                     </TableCell>
                   </TableRow>
+
                 ) : (
-                  staff.map((member) => (
-                    <TableRow key={member.id} data-testid="staff-row">
-                      <TableCell className="font-medium">{member.employee_number}</TableCell>
-                      <TableCell>{member.user?.full_name}</TableCell>
+                  safeStaff.map((member) => (
+                    <TableRow key={member.id || member._id}>
+                      <TableCell>{member.employee_number}</TableCell>
+                      <TableCell>
+                        {member.full_name || member.user?.full_name}
+                      </TableCell>
                       <TableCell>{member.department}</TableCell>
                       <TableCell>{member.position}</TableCell>
-                      <TableCell>{member.user?.phone}</TableCell>
+                      <TableCell>
+                        {member.phone || member.user?.phone}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
+
               </TableBody>
+
             </Table>
+
           </div>
         </CardContent>
       </Card>
+
     </div>
   );
 };

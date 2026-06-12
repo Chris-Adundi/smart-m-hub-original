@@ -36,10 +36,12 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground font-sans;
     font-family: 'Inter', sans-serif;
   }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Manrope', sans-serif;
   }
@@ -51,7 +53,10 @@
   }
 }
 
-/* Custom dark theme utilities */
+/* =========================
+   UI COMPONENT UTILITIES
+   ========================= */
+
 .glass-card {
   background: rgba(17, 25, 40, 0.75);
   border: 1px solid rgba(45, 212, 191, 0.12);
@@ -59,36 +64,31 @@
 }
 
 .glow-border {
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.1), 0 0 20px rgba(16, 185, 129, 0.05);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.1),
+              0 0 20px rgba(16, 185, 129, 0.05);
 }
 
 .glow-border-active {
-  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3), 0 0 30px rgba(16, 185, 129, 0.1);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3),
+              0 0 30px rgba(16, 185, 129, 0.1);
 }
 
-/* Hide Emergent branding */
-div[class*="emergent"],
-div[id*="emergent"],
-a[href*="emergent"],
-button[class*="emergent"],
-[data-emergent],
-div:has(> a[href*="emergent.sh"]),
-#emergent-badge,
+/* =========================
+   SAFE BRANDING OVERRIDE
+   (LESS AGGRESSIVE FIX)
+   ========================= */
+
+/* Only target known containers instead of global selectors */
 .emergent-badge,
-[class*="made-with"],
-[id*="made-with"] {
+#emergent-badge,
+[class*="made-with-emergent"] {
   display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
-  position: absolute !important;
-  left: -9999px !important;
 }
 
-button[style*="position: fixed"][style*="bottom"],
-div[style*="position: fixed"][style*="bottom"][style*="right"],
-a[style*="position: fixed"][style*="bottom"] {
+/* Avoid :has() and broad attribute traps (they break performance) */
+div[class*="emergent"] {
   display: none !important;
 }
+
+/* FIX: removed dangerous fixed-position blanket rule
+   (it was hiding legitimate UI elements like modals, toasts, chat buttons) */

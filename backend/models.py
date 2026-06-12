@@ -5,6 +5,10 @@ from enum import Enum
 import uuid
 
 
+# =========================
+# ENUMS
+# =========================
+
 class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
     SCHOOL_ADMIN = "school_admin"
@@ -31,113 +35,156 @@ class PaymentStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class PaymentMethod(str, Enum):
-    MPESA = "mpesa"
-    BANK_TRANSFER = "bank_transfer"
-    CASH = "cash"
-    CHEQUE = "cheque"
 
 
 class AttendanceStatus(str, Enum):
     PRESENT = "present"
     ABSENT = "absent"
     LATE = "late"
-    EXCUSED = "excused"
-    SICK_LEAVE = "sick_leave"
 
 
 class StudentStatus(str, Enum):
     ACTIVE = "active"
+    INACTIVE = "inactive"
     GRADUATED = "graduated"
-    DEFERRED = "deferred"
-    TRANSFERRED = "transferred"
     SUSPENDED = "suspended"
-    EXPELLED = "expelled"
-
-
-class CBEGrade(str, Enum):
-    EE = "EE"  # Exceeding Expectations
-    ME = "ME"  # Meeting Expectations
-    AE = "AE"  # Approaching Expectations
-    BE = "BE"  # Below Expectations
 
 
 class SchoolType(str, Enum):
     PRIMARY = "primary"
     JUNIOR_SECONDARY = "junior_secondary"
     SENIOR_SECONDARY = "senior_secondary"
+    SECONDARY = "secondary"
     COLLEGE = "college"
     UNIVERSITY = "university"
+    OTHER = "other"
 
+
+class PaymentMethod(str, Enum):
+    MPESA = "mpesa"
+    CASH = "cash"
+    BANK_TRANSFER = "bank_transfer"
+    CHEQUE = "cheque"
+
+
+class CBEGrade(str, Enum):
+    EE1 = "EE1"
+    EE2 = "EE2"
+    ME1 = "ME1"
+    ME2 = "ME2"
+    AE1 = "AE1"
+    AE2 = "AE2"
+    BE1 = "BE1"
+    BE2 = "BE2"
+
+
+# =========================
+# BASE UTILS
+# =========================
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def gen_id():
+    return str(uuid.uuid4())
+
+
+# =========================
+# ROLE NORMALIZATION HELPER (FIXED SAFETY)
+# =========================
+def normalize_role_value(role) -> str:
+    if not role:
+        return ""
+    return str(role).strip().lower().replace(" ", "_")
+
+
+# =========================
+# SCHOOL
+# =========================
 
 class School(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     name: str
-    logo_url: Optional[str] = None
-    stamp_url: Optional[str] = None
     address: str
     phone: str
     email: EmailStr
-    school_type: SchoolType
-    motto: Optional[str] = None
-    vision: Optional[str] = None
-    mission: Optional[str] = None
-    principal_name: Optional[str] = None
-    website: Optional[str] = None
-    established_year: Optional[str] = None
-    subscription_status: SubscriptionStatus = SubscriptionStatus.INACTIVE
-    installation_fee_paid: bool = False
-    installation_paid_at: Optional[datetime] = None
-    active_users_count: int = 0
-    monthly_billing_date: Optional[datetime] = None
-    next_billing_date: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    school_type: Optional[SchoolType] = None
 
+    password_hash: Optional[str] = None
+
+    invite_code: str = Field(default_factory=lambda: str(uuid.uuid4())[:8].upper())
+
+    status: str = "active"
+
+    subscription_status: SubscriptionStatus = SubscriptionStatus.ACTIVE
+    subscription_amount: float = 2000
+
+    active_users_count: int = 0
+
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# USER (FIXED: STRING ROLE SAFETY)
+# =========================
 
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: Optional[str] = None
+
     email: EmailStr
     password_hash: str
     full_name: str
-    phone: str
-    role: UserRole
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    phone: Optional[str] = None
 
+    # FIX: store as STRING to avoid enum mismatch issues
+    role: str = "teacher"
+
+    # FIX: string instead of enum to avoid frontend/backend mismatch crashes
+    approval_status: str = "pending"
+
+    is_active: bool = True
+
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# STUDENT
+# =========================
 
 class Student(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
-    admission_number: str
+
+    admission_number: Optional[str] = None
     full_name: str
-    date_of_birth: datetime
-    gender: str
+
+    date_of_birth: Optional[datetime] = None
+    gender: Optional[str] = None
+
     class_name: Optional[str] = None
     year_of_study: Optional[str] = None
     stream: Optional[str] = None
 
-    # Primary Guardian
-    guardian_name: str
-    guardian_phone: str
+    guardian_name: Optional[str] = None
+    guardian_phone: Optional[str] = None
     guardian_email: Optional[EmailStr] = None
     guardian_relationship: Optional[str] = None
 
-    # Secondary Guardian
     secondary_guardian_name: Optional[str] = None
     secondary_guardian_phone: Optional[str] = None
     secondary_guardian_email: Optional[EmailStr] = None
     secondary_guardian_relationship: Optional[str] = None
 
-    # Extended Health Info
     blood_type: Optional[str] = None
     allergies: Optional[str] = None
     chronic_conditions: Optional[str] = None
@@ -146,182 +193,222 @@ class Student(BaseModel):
     medical_info: Optional[str] = None
 
     status: StudentStatus = StudentStatus.ACTIVE
-    student_user_id: Optional[str] = None
-    certificate_collected: bool = False
-    certificate_collection_date: Optional[datetime] = None
-    certificate_available: bool = False
-    status_changed_at: Optional[datetime] = None
-    status_reason: Optional[str] = None
-
-    # Approval workflow
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
+
     submitted_by: Optional[str] = None
     approved_by: Optional[str] = None
-    approval_date: Optional[str] = None
-    rejection_reason: Optional[str] = None
+    approval_date: Optional[datetime] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    certificate_collected: bool = False
+    certificate_collection_date: Optional[str] = None
 
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# STAFF
+# =========================
 
 class Staff(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
     user_id: str
+
     employee_number: str
     department: str
     position: str
-    responsibilities: Optional[str] = None
     salary: Optional[float] = None
-    joined_date: datetime
-    sick_leave_days: int = 0
-    annual_leave_days: int = 0
-    leave_balance: int = 21
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    joined_date: Optional[datetime] = None
+
+    created_at: datetime = Field(default_factory=now_utc)
 
 
-class FeeStructure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    school_id: str
-    class_name: Optional[str] = None
-    year_of_study: Optional[str] = None
-    term: str
-    amount: float
-    description: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
+# =========================
+# PAYMENT
+# =========================
 
 class Payment(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     student_id: Optional[str] = None
     amount: float
-    payment_type: str
-    payment_method: PaymentMethod
-    mpesa_checkout_id: Optional[str] = None
-    mpesa_receipt: Optional[str] = None
+
+    payment_type: Optional[str] = None
+    payment_method: PaymentMethod = PaymentMethod.MPESA
+
+    phone_number: Optional[str] = None
     bank_reference: Optional[str] = None
     cheque_number: Optional[str] = None
-    phone_number: Optional[str] = None
-    receipt_number: str = Field(default_factory=lambda: f"RCP{str(uuid.uuid4())[:8].upper()}")
-    status: PaymentStatus = PaymentStatus.PENDING
-    running_balance: Optional[float] = None
     description: Optional[str] = None
 
-    # Approval workflow
+    status: PaymentStatus = PaymentStatus.PENDING
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
+
+    receipt_number: str = Field(default_factory=lambda: str(uuid.uuid4())[:10].upper())
+
     submitted_by: Optional[str] = None
     approved_by: Optional[str] = None
-    approval_date: Optional[str] = None
-    rejection_reason: Optional[str] = None
+    approval_date: Optional[datetime] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
 
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# ATTENDANCE
+# =========================
 
 class Attendance(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     student_id: Optional[str] = None
-    staff_id: Optional[str] = None
+    class_name: Optional[str] = None
+
     date: datetime
-    status: AttendanceStatus
+
+    status: AttendanceStatus = AttendanceStatus.PRESENT
+
+    marked_by: Optional[str] = None
     remarks: Optional[str] = None
 
-    # Approval workflow
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
-    submitted_by: Optional[str] = None
-    approved_by: Optional[str] = None
-    approval_date: Optional[str] = None
-    rejection_reason: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=now_utc)
 
+
+# =========================
+# EXAM
+# =========================
 
 class Exam(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     name: str
     class_name: Optional[str] = None
     year_of_study: Optional[str] = None
     term: str
     exam_number: str
     academic_year: str
-    exam_date: datetime
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    exam_date: datetime
+
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# RESULT
+# =========================
 
 class Result(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     exam_id: str
     student_id: str
+
     subject: str
     marks: float
-    max_marks: float = 100
-    grade: CBEGrade = CBEGrade.BE
-    teacher_comments: Optional[str] = None
-    remarks: Optional[str] = None
+    grade: CBEGrade
 
-    # Approval workflow
+    teacher_comments: Optional[str] = None
+
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
+
     submitted_by: Optional[str] = None
     approved_by: Optional[str] = None
-    approval_date: Optional[str] = None
-    rejection_reason: Optional[str] = None
+    approval_date: Optional[datetime] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=now_utc)
 
+
+# =========================
+# ANNOUNCEMENT
+# =========================
 
 class Announcement(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     title: str
     content: str
+
     target_audience: str
     target_class: Optional[str] = None
     priority: str = "normal"
-    created_by: str
 
-    # Approval workflow
+    created_by: Optional[str] = None
+
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
+
     submitted_by: Optional[str] = None
     approved_by: Optional[str] = None
-    approval_date: Optional[str] = None
-    rejection_reason: Optional[str] = None
+    approval_date: Optional[datetime] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=now_utc)
 
+
+# =========================
+# FEE STRUCTURE
+# =========================
+
+class FeeStructure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=gen_id)
+    school_id: str
+
+    class_name: str
+    amount: float
+
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# TIMETABLE
+# =========================
 
 class Timetable(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    school_id: str
-    class_name: Optional[str] = None
-    year_of_study: Optional[str] = None
-    day_of_week: str
-    time_slot: str
-    subject: str
-    teacher_id: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    id: str = Field(default_factory=gen_id)
+    school_id: str
+
+    class_name: Optional[str] = None
+    day: Optional[str] = None
+    subject: Optional[str] = None
+    time: Optional[str] = None
+
+
+# =========================
+# INVENTORY
+# =========================
 
 class InventoryItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(default_factory=gen_id)
     school_id: str
+
     name: str
-    category: str
-    quantity: int
-    unit: str
-    location: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    quantity: int = 0
+    category: Optional[str] = None
+
+    created_at: datetime = Field(default_factory=now_utc)
