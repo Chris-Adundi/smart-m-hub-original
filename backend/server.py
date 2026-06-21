@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
 import os
@@ -79,11 +79,19 @@ db = client[db_name]
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(
-    title="Smart-M Hub Original API",
-    version="1.0.0"
-)
 
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # =====================================================
 # CORS
 # =====================================================
@@ -1715,56 +1723,29 @@ async def join_school(request: dict):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@api_router.post(
-    "/auth/login",
-    operation_id="auth_login_user"
-)
+@api_router.post("/auth/login", operation_id="auth_login_user")
 async def login(request: LoginRequest):
-
     try:
-
-        # =========================
-        # INPUT NORMALIZATION
-        # =========================
         email = (request.email or "").strip().lower()
-        password = request.password
+        password = (request.password or "").strip()
 
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
 
-        if not password or not isinstance(password, str):
-            raise HTTPException(status_code=400, detail="Invalid password format")
-
-        password = password.strip()
-
-        # bcrypt safety limit
-        if len(password.encode("utf-8")) > 72:
-            raise HTTPException(status_code=400, detail="Invalid password input detected")
-
-        # =========================
-        # FIND USER
-        # =========================
         user = await db.users.find_one({"email": email})
 
         if not user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        # =========================
-        # PASSWORD CHECK
-        # =========================
+        user_id = user.get("id") or str(user.get("_id"))
+
         stored_hash = user.get("password_hash") or user.get("hashed_password")
 
         if not stored_hash or not verify_password(password, stored_hash):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        # =========================
-        # ROLE NORMALIZATION (FIXED CONSISTENCY)
-        # =========================
         db_role = normalize_role(user.get("role") or "")
 
-        # =========================
-        # ACCOUNT STATUS CHECKS
-        # =========================
         if user.get("is_active") is False:
             raise HTTPException(status_code=403, detail="Account disabled")
 
@@ -1773,87 +1754,52 @@ async def login(request: LoginRequest):
 
         approval_status = (user.get("approval_status") or "pending").lower()
 
-        if db_role != "SCHOOL_ADMIN":
-            if approval_status != "approved":
-                raise HTTPException(status_code=403, detail="Account not approved")
+        if db_role != "school_admin" and approval_status != "approved":
+            raise HTTPException(status_code=403, detail="Account not approved")
 
-        # =========================
-        # SCHOOL FETCH
-        # =========================
-        school = None
         school_id = user.get("school_id")
 
+        school = None
         if school_id:
-            school = await db.schools.find_one({"id": school_id})
-
-            if school and school.get("is_active") is False:
-                raise HTTPException(status_code=403, detail="School inactive")
-
+            school = await db.schools.find_one({"id": school_id}) or await db.schools.find_one({"_id": school_id})
             if school:
-                school = serialize_doc(school)
+                school.pop("_id", None)
 
-        # =========================
-        # UPDATE LAST LOGIN
-        # =========================
         await db.users.update_one(
-            {"id": user.get("id")},
-            {
-                "$set": {
-                    "last_login": now_utc(),
-                    "updated_at": now_utc()
-                }
-            }
+            {"id": user_id},
+            {"$set": {"last_login": now_iso(), "updated_at": now_iso()}}
         )
 
-        # =========================
-        # TOKEN
-        # =========================
-        token_data = {
-            "user_id": user.get("id"),
+        token = create_access_token({
+            "user_id": user_id,
             "email": email,
             "role": db_role,
             "school_id": school_id
-        }
-
-        access_token = create_access_token(token_data)
-
-        # =========================
-        # SAFE RESPONSE
-        # =========================
-        safe_user = {
-            "id": user.get("id"),
-            "email": email,
-            "full_name": user.get("full_name") or "User",
-            "role": db_role,
-            "school_id": school_id,
-            "school_name": school.get("name") if school else None,
-            "approval_status": approval_status,
-            "is_active": user.get("is_active", True),
-            "is_suspended": user.get("is_suspended", False)
-        }
+        })
 
         return {
             "success": True,
-            "access_token": access_token,
+            "access_token": token,
             "token_type": "bearer",
-            "user": safe_user,
+            "user": {
+                "id": user_id,
+                "email": email,
+                "full_name": user.get("full_name") or "User",
+                "role": db_role,
+                "school_id": school_id,
+                "school_name": school.get("name") if school else None,
+                "approval_status": approval_status,
+                "is_active": user.get("is_active", True),
+                "is_suspended": user.get("is_suspended", False)
+            },
             "school": school
         }
 
     except HTTPException:
         raise
-
     except Exception as e:
         logger.error(f"LOGIN ERROR: {str(e)}")
         raise HTTPException(status_code=500, detail="Login failed")
-
-
-from fastapi import Depends, HTTPException
-from uuid import uuid4
-from datetime import datetime
-import os
-
-from slugify import slugify
 
 # =========================================
 # SCHOOL INVITE + UNIQUE LINKS
@@ -3153,160 +3099,58 @@ async def get_attendance(
 
 # ─── Exams ────────────────────────────────────────────────────────
 
-@api_router.post("/auth/login")
-async def login(request: LoginRequest):
-
+# OLD LOGIN - DISABLED
+# @api_router.post("/auth/login")
+async def login_legacy(request: LoginRequest):
     try:
-
-        # =========================
-        # INPUT NORMALIZATION
-        # =========================
         email = (request.email or "").strip().lower()
-        password = (request.password or "").strip()
-
-        request_role = normalize_role(getattr(request, "role", "") or "")
 
         if not email:
             raise HTTPException(status_code=400, detail="Email is required")
 
-        if not password:
+        if not request.password:
             raise HTTPException(status_code=400, detail="Password is required")
 
-        print("\n========== LOGIN ATTEMPT ==========")
-        print("EMAIL:", email)
-        print("REQUEST ROLE:", request_role)
-
-        # =========================
-        # FIND USER
-        # =========================
         user = await db.users.find_one({"email": email})
 
         if not user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        # =========================
-        # PASSWORD RESOLUTION (SAFE)
-        # =========================
-        stored_hash = (
-            user.get("password_hash")
-            or user.get("hashed_password")
-        )
+        # ✅ SAFE USER ID FIX (IMPORTANT)
+        user_id = user.get("id") or str(user.get("_id"))
 
-        if not stored_hash:
-            raise HTTPException(status_code=401, detail="Password not configured")
+        stored_hash = user.get("password_hash")
 
-        if not verify_password(password, stored_hash):
+        # HARD SAFETY CHECK
+        if not isinstance(stored_hash, str) or not stored_hash.startswith("$2b$"):
+            raise HTTPException(
+                status_code=500,
+                detail="Invalid password hash format in database"
+            )
+
+        # PASSWORD CHECK
+        if not verify_password(request.password, stored_hash):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        # =========================
-        # ROLE NORMALIZATION (DB SOURCE OF TRUTH)
-        # =========================
-        db_role = normalize_role(user.get("role") or "")
+        # ROLE
+        db_role = user.get("role")
 
-        print("DATABASE ROLE:", db_role)
-
-        # =========================
-        # OPTIONAL ROLE ENFORCEMENT (SOFT CHECK)
-        # =========================
-        if request_role:
-            if db_role != request_role:
-                # allow admin alias flexibility
-                if not (
-                    db_role in ["SCHOOL_ADMIN", "SUPER_ADMIN"]
-                    and request_role in ["ADMIN", "SCHOOL_ADMIN", "SUPER_ADMIN"]
-                ):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Access denied for selected role"
-                    )
-
-        # =========================
-        # ACCOUNT STATUS CHECKS
-        # =========================
-        if user.get("is_active") is False:
-            raise HTTPException(status_code=403, detail="Account disabled")
-
-        if user.get("is_suspended") is True:
-            raise HTTPException(status_code=403, detail="Account suspended")
-
-        approval_status = str(user.get("approval_status") or "pending").lower()
-
-        # school_admin bypass approval
-        if db_role != "SCHOOL_ADMIN":
-            if approval_status != "approved":
-                raise HTTPException(
-                    status_code=403,
-                    detail="Account not approved"
-                )
-
-        # =========================
-        # SCHOOL VALIDATION
-        # =========================
-        school = None
-        school_id = user.get("school_id")
-
-        if school_id:
-            school = await db.schools.find_one({"id": school_id})
-
-            if school and school.get("is_active") is False:
-                raise HTTPException(status_code=403, detail="School inactive")
-
-            if school:
-                school = serialize_doc(school)
-
-        # =========================
-        # UPDATE LAST LOGIN
-        # =========================
-        await db.users.update_one(
-            {"id": user.get("id")},
-            {
-                "$set": {
-                    "last_login": now_utc(),
-                    "updated_at": now_utc()
-                }
-            }
-        )
-
-        # =========================
-        # TOKEN PAYLOAD
-        # =========================
-        token_data = {
-            "type": "user",
-            "user_id": user.get("id"),
-            "email": email,
+        # TOKEN
+        token = create_access_token({
+            "user_id": user_id,
+            "email": user["email"],
             "role": db_role,
-            "school_id": school_id
-        }
-
-        access_token = create_access_token(token_data)
-
-        print("LOGIN SUCCESSFUL")
-        print("===================================\n")
-
-        # =========================
-        # SAFE USER RESPONSE
-        # =========================
-        safe_user = {
-            "id": user.get("id"),
-            "email": email,
-            "full_name": (
-                user.get("full_name")
-                or user.get("name")
-                or "User"
-            ),
-            "role": db_role,
-            "school_id": school_id,
-            "approval_status": approval_status,
-            "is_active": user.get("is_active", True),
-            "is_suspended": user.get("is_suspended", False)
-        }
+            "school_id": user.get("school_id")
+        })
 
         return {
             "success": True,
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": safe_user,
-            "school": school
+            "access_token": token,
+            "user": {
+                "id": user_id,
+                "email": user["email"],
+                "role": db_role
+            }
         }
 
     except HTTPException:
@@ -3319,59 +3163,46 @@ async def login(request: LoginRequest):
 # =========================
 # GET EXAMS (FIXED VERSION)
 # =========================
-@api_router.get("/exams")
-async def get_exams(current_user: dict = Depends(get_current_user)):
-
+async def login_legacy(request: LoginRequest):
     try:
-        school_id = current_user.get("school_id")
+        email = (request.email or "").strip().lower()
+        password = (request.password or "").strip()
 
-        if not school_id:
-            raise HTTPException(status_code=403, detail="Unauthorized (no school_id)")
+        user = await db.users.find_one({"email": email})
 
-        # =========================
-        # SAFE ROLE NORMALIZATION
-        # =========================
-        raw_role = current_user.get("role", "")
-        role = normalize_role(raw_role)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
 
-        if not role:
-            raise HTTPException(status_code=403, detail="Unauthorized (invalid role)")
+        user_id = user.get("id") or str(user.get("_id"))
 
-        # enforce lowercase-safe comparison
-        role = role.lower()
+        stored_hash = user.get("password_hash")
 
-        # =========================
-        # BUILD QUERY
-        # =========================
-        query = {
-            "school_id": school_id
+        if not stored_hash or not verify_password(password, stored_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        token = create_access_token({
+            "user_id": user_id,
+            "email": email,
+            "role": user.get("role"),
+            "school_id": user.get("school_id")
+        })
+
+        return {
+            "success": True,
+            "access_token": token,
+            "token_type": "bearer",
+            "user": {
+                "id": user_id,
+                "email": email,
+                "role": user.get("role")
+            }
         }
-
-        # =========================
-        # ACCESS CONTROL
-        # =========================
-        admin_roles = {"school_admin", "super_admin"}
-
-        # non-admins only see approved exams
-        if role not in admin_roles:
-            query["approval_status"] = "approved"
-
-        # =========================
-        # FETCH DATA
-        # =========================
-        exams = await db.exams.find(
-            query,
-            {"_id": 0}
-        ).to_list(length=1000)
-
-        return exams
 
     except HTTPException:
         raise
-
     except Exception as e:
-        logger.error(f"Get exams error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"LOGIN ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail="Login failed")
 
 # ─── Results ───────────────────────────────────────────────
 
@@ -3839,139 +3670,6 @@ async def get_approval_requests(
         logger.error(f"Get approval requests error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-
-# ───────────────────────────────────────────────────────────────
-# LOGIN (CLEAN + CONSISTENT + SAFE)
-# ───────────────────────────────────────────────────────────────
-
-@api_router.post("/auth/login")
-async def login(request: LoginRequest):
-    try:
-
-        # =========================
-        # SAFE INPUT NORMALIZATION
-        # =========================
-        email = (request.email or "").strip().lower()
-        role_hint = normalize_role(getattr(request, "role", None))
-
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
-
-        if not request.password:
-            raise HTTPException(status_code=400, detail="Password is required")
-
-        # =========================
-        # USER LOOKUP
-        # =========================
-        user = await db.users.find_one({"email": email})
-
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        # =========================
-        # PASSWORD CHECK
-        # =========================
-        stored_hash = user.get("password_hash") or user.get("hashed_password")
-
-        if not stored_hash:
-            raise HTTPException(status_code=401, detail="Password not set")
-
-        if not verify_password(request.password, stored_hash):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        # =========================
-        # ROLE NORMALIZATION (DB IS SOURCE OF TRUTH)
-        # =========================
-        db_role = normalize_role(user.get("role"))
-
-        # optional role hint check
-        if role_hint and db_role != role_hint:
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied for selected role"
-            )
-
-        # =========================
-        # ACCOUNT STATUS CHECKS
-        # =========================
-        if user.get("is_active") is False:
-            raise HTTPException(status_code=403, detail="Account disabled")
-
-        if user.get("is_suspended") is True:
-            raise HTTPException(status_code=403, detail="Account suspended")
-
-        approval_status = str(user.get("approval_status", "approved")).lower()
-
-        if db_role != "school_admin" and approval_status != "approved":
-            raise HTTPException(
-                status_code=403,
-                detail="Account awaiting approval"
-            )
-
-        # =========================
-        # SCHOOL VALIDATION
-        # =========================
-        school = None
-
-        if user.get("school_id"):
-            school = await db.schools.find_one({"id": user["school_id"]})
-
-            if school:
-                school.pop("_id", None)
-
-                if school.get("is_active") is False:
-                    raise HTTPException(status_code=403, detail="School inactive")
-
-        # =========================
-        # UPDATE LAST LOGIN
-        # =========================
-        await db.users.update_one(
-            {"id": user["id"]},
-            {
-                "$set": {
-                    "last_login": now_iso(),
-                    "updated_at": now_iso()
-                }
-            }
-        )
-
-        # =========================
-        # TOKEN
-        # =========================
-        token_data = {
-            "type": "user",
-            "user_id": user["id"],
-            "email": user["email"],
-            "role": db_role,
-            "school_id": user.get("school_id")
-        }
-
-        token = create_access_token(token_data)
-
-        # =========================
-        # RESPONSE
-        # =========================
-        return {
-            "success": True,
-            "access_token": token,
-            "token_type": "bearer",
-            "user": {
-                "id": user["id"],
-                "email": user["email"],
-                "full_name": user.get("full_name", ""),
-                "role": db_role,
-                "school_id": user.get("school_id"),
-                "approval_status": approval_status
-            },
-            "school": school
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Login failed")
 
 # ─── Dashboard Stats ─────────────────────────────────────────────
 

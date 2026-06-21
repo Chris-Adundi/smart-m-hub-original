@@ -58,10 +58,10 @@ import AnnouncementsPage from "@/pages/AnnouncementsPage";
 import DataExplorer from "@/pages/DataExplorer";
 
 // ======================
-// BACKEND
+// BACKEND (SINGLE SOURCE OF TRUTH)
 // ======================
 const BACKEND_URL =
-  process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+  process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
 
 export const API = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 
@@ -71,9 +71,12 @@ export const API = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 export const normalizeRole = (role) => {
   if (!role) return "";
 
-  const r = String(role).trim().toLowerCase();
+  const r = String(role)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
-  const roleMap = {
+  const map = {
     admin: "school_admin",
     schooladmin: "school_admin",
     school_admin: "school_admin",
@@ -84,12 +87,11 @@ export const normalizeRole = (role) => {
     teacher: "teacher",
     finance: "finance",
     secretary: "secretary",
-
     student: "student",
     parent: "student",
   };
 
-  return roleMap[r] || r;
+  return map[r] || r;
 };
 // ======================
 // DEFAULT REDIRECT
@@ -117,18 +119,19 @@ export const getDefaultRouteByRole = (role) => {
   }
 };
 // ======================
-// AUTH SERVICE
+// AUTH SERVICE (CLEAN SINGLE SOURCE)
 // ======================
+
+const TOKEN_KEY = "smart_m_hub_token";
+const USER_KEY = "smart_m_hub_user";
+
 export const authService = {
-  getToken: () => localStorage.getItem("token"),
+  getToken: () => localStorage.getItem(TOKEN_KEY),
 
   getUser: () => {
     try {
-      const raw = localStorage.getItem("user");
-
-      if (!raw || raw === "undefined") {
-        return null;
-      }
+      const raw = localStorage.getItem(USER_KEY);
+      if (!raw || raw === "undefined") return null;
 
       const parsed = JSON.parse(raw);
 
@@ -144,35 +147,36 @@ export const authService = {
   setAuth: (token, user) => {
     if (!token || !user) return;
 
-    localStorage.setItem("token", token);
+    const safeUser = {
+      ...user,
+      role: normalizeRole(user?.role),
+    };
 
-    localStorage.setItem(
-      "user",
-      JSON.stringify({
-        ...user,
-        role: normalizeRole(user?.role),
-      })
-    );
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
   },
 
   clearAuth: () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   },
 
   isAuthenticated: () => {
-    return !!localStorage.getItem("token");
+    return !!localStorage.getItem(TOKEN_KEY);
   },
 };
 
 // ======================
-// AXIOS
+// AXIOS INSTANCE (USES SAME SOURCE AS API)
 // ======================
 export const apiClient = axios.create({
   baseURL: API,
   timeout: 30000,
 });
 
+// ======================
+// REQUEST INTERCEPTOR (ONLY ONE)
+// ======================
 apiClient.interceptors.request.use((config) => {
   const token = authService.getToken();
 
@@ -182,17 +186,21 @@ apiClient.interceptors.request.use((config) => {
 
   config.headers["Content-Type"] = "application/json";
 
+  console.log("API REQUEST:", config.method, config.url);
+
   return config;
 });
 
+// ======================
+// RESPONSE INTERCEPTOR (SINGLE HANDLER)
+// ======================
 apiClient.interceptors.response.use(
   (response) => response,
-
   (error) => {
     const status = error?.response?.status;
 
-    // IMPORTANT FIX:
-    // return to LANDING PAGE instead of forcing /login
+    console.log("API ERROR:", status, error?.config?.url);
+
     if (status === 401) {
       authService.clearAuth();
 
@@ -200,21 +208,13 @@ apiClient.interceptors.response.use(
         window.location.pathname !== "/" &&
         !window.location.pathname.includes("/join/")
       ) {
-        window.location.href = "/";
+        window.location.replace("/");
       }
     }
-
-    console.error("API ERROR:", {
-      url: error?.config?.url,
-      method: error?.config?.method,
-      status,
-      data: error?.response?.data,
-    });
 
     return Promise.reject(error);
   }
 );
-
 // ======================
 // ROUTE PERMISSIONS
 // ======================
@@ -335,10 +335,8 @@ school_profile: ["super_admin", "school_admin"],
 const ProtectedRoute = () => {
   const token = authService.getToken();
 
-  // IMPORTANT FIX:
-  // redirect to LANDING PAGE
   if (!token) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/login" replace />;
   }
 
   return <Outlet />;
@@ -347,27 +345,16 @@ const ProtectedRoute = () => {
 // ======================
 // ROLE PROTECTION
 // ======================
-const RoleProtectedRoute = ({
-  routeKey,
-  children,
-}) => {
-  // ======================
-  // AUTH CHECK
-  // ======================
+const RoleProtectedRoute = ({ routeKey, children }) => {
+  const [ready, setReady] = useState(false);
 
   const token = authService.getToken();
-  const user = authService.getUser();
+  const user = useMemo(() => authService.getUser(), []);
 
-  if (!token || !user) {
-    authService.clearAuth();
-
-    return (
-      <Navigate
-        to="/login"
-        replace
-      />
-    );
-  }
+    useEffect(() => {
+      const t = setTimeout(() => setReady(true), 0);
+      return () => clearTimeout(t);
+    }, []);
 
   // ======================
   // ROLE NORMALIZATION
@@ -401,14 +388,9 @@ const RoleProtectedRoute = ({
   // ACCESS DENIED
   // ======================
 
-  if (!allowedRoles.includes(role)) {
-    return (
-      <Navigate
-        to={getDefaultRouteByRole(role)}
-        replace
-      />
-    );
-  }
+  if (!role || !allowedRoles.includes(role)) {
+  return <Navigate to="/login" replace />;
+}
 
   // ======================
   // SUCCESS

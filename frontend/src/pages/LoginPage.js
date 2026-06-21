@@ -1,18 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useNavigate,
   useLocation,
   useParams,
 } from "react-router-dom";
-import axios from "axios";
+import { authService, apiClient } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { toast } from "sonner";
-
-import { authService, API } from "@/App";
 
 import {
   GraduationCap,
@@ -141,22 +139,22 @@ const getRedirectPath = (role) => {
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-
+  
+  const [selectedRole, setSelectedRole] = useState(
+  normalizeRole(location.state?.role || "")
+);
   // ========================================
   // STATE
   // ========================================
 
-  const [selectedRole, setSelectedRole] = useState(
-    normalizeRole(location.state?.role || "")
-    );
+  useEffect(() => {
+  const urlRole = new URLSearchParams(location.search).get("role");
 
-    useEffect(() => {
-      const urlRole = new URLSearchParams(location.search).get("role");
-
-      if (urlRole && !selectedRole) {
-        setSelectedRole(normalizeRole(urlRole));
-      }
-    }, [location.search]);
+  if (urlRole && !selectedRole) {
+    setSelectedRole(normalizeRole(urlRole));
+  }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [location.search]);
 
   const [loading, setLoading] = useState(false);
 
@@ -178,6 +176,7 @@ const schoolSlug =
   // ========================================
 
   useEffect(() => {
+  const handler = () => {
     const token = authService.getToken();
     const user = authService.getUser();
 
@@ -186,23 +185,27 @@ const schoolSlug =
         replace: true,
       });
     }
-  }, [navigate]);
+  };
 
+  handler();
+  window.addEventListener("auth-change", handler);
+
+  return () => window.removeEventListener("auth-change", handler);
+}, [navigate]);
   // ========================================
   // HELPERS
   // ========================================
 
-  const updateField = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
+ const updateField = (field, value) => {
+  setFormData((prev) => ({
+    ...prev,
+    [field]: value,
+  }));
+};
 
-  const selectedRoleData = useMemo(() => {
-    return roles.find((r) => r.key === selectedRole);
-  }, [selectedRole]);
-
+const selectedRoleData = roles.find(
+  (r) => r.key === selectedRole
+);
   // ========================================
   // LOGIN SUBMIT
   // ========================================
@@ -259,21 +262,11 @@ const schoolSlug =
       // LOGIN REQUEST
       // ========================================
 
-      const response = await axios.post(
-        `${API}/auth/login`,
+      const response = await apiClient.post(
+        "/auth/login",
         {
-          email: formData.email
-            .trim()
-            .toLowerCase(),
-
+          email: formData.email.trim().toLowerCase(),
           password: cleanPassword,
-        },
-        {
-          timeout: 15000,
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
         }
       );
 

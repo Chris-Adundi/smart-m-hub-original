@@ -1,5 +1,5 @@
 // =========================
-// FRONTEND AUTH SERVICE
+// FRONTEND AUTH SERVICE (FINAL CLEAN)
 // =========================
 
 const TOKEN_KEY = "smart_m_hub_token";
@@ -17,64 +17,82 @@ function safeParse(json) {
 }
 
 // =========================
-// NORMALIZE ROLE (MATCH BACKEND)
+// ROLE NORMALIZER (SINGLE SOURCE OF TRUTH STYLE)
 // =========================
 function normalizeRole(role) {
   if (!role) return "";
-  return String(role).trim().toLowerCase().replace(/\s+/g, "_");
+
+  const r = String(role).trim().toLowerCase();
+
+  const map = {
+    admin: "school_admin",
+    schooladmin: "school_admin",
+    school_admin: "school_admin",
+    "school-admin": "school_admin",
+
+    superadmin: "super_admin",
+    super_admin: "super_admin",
+    "super-admin": "super_admin",
+
+    teacher: "teacher",
+
+    finance: "finance",
+    accounts: "finance",
+    accountant: "finance",
+
+    secretary: "secretary",
+
+    student: "student",
+    parent: "student",
+    guardian: "student",
+  };
+
+  return map[r] || r;
 }
 
 // =========================
-// SAVE AUTH
+// AUTH SERVICE
 // =========================
 export const authService = {
   setAuth(token, user) {
     if (!token || !user) return;
 
-    // ensure consistent storage shape
+    if (token === "undefined" || token === "null") return;
+
     const safeUser = {
       ...user,
-      role: normalizeRole(user.role),
-      school_id: user.school_id ? String(user.school_id) : null,
+      role: normalizeRole(user?.role),
+      school_id: user?.school_id ? String(user.school_id) : null,
     };
 
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
   },
 
-  // =========================
-  // GET TOKEN
-  // =========================
   getToken() {
-    return localStorage.getItem(TOKEN_KEY);
+    const token = localStorage.getItem(TOKEN_KEY);
+
+    if (!token || token === "undefined" || token === "null") {
+      return null;
+    }
+
+    return token;
   },
 
-  // =========================
-  // GET USER
-  // =========================
   getUser() {
-    const user = localStorage.getItem(USER_KEY);
-    return user ? safeParse(user) : null;
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? safeParse(raw) : null;
   },
 
-  // =========================
-  // CHECK LOGIN
-  // =========================
   isAuthenticated() {
     return !!this.getToken();
   },
 
-  // =========================
-  // CLEAR AUTH
-  // =========================
   clearAuth() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
   },
 
-  // =========================
-  // ROLE HELPERS
-  // =========================
   getRole() {
     const user = this.getUser();
     return normalizeRole(user?.role);
@@ -106,18 +124,12 @@ export const authService = {
   },
 
   isParent() {
-    return this.getRole() === "parent";
+    return this.getRole() === "student";
   },
 
-  // =========================
-  // SCHOOL CONTEXT (CRITICAL FIX)
-  // =========================
   getSchoolId() {
     const user = this.getUser();
     const id = user?.school_id;
-
-    if (!id) return null;
-
-    return String(id);
+    return id ? String(id) : null;
   },
 };

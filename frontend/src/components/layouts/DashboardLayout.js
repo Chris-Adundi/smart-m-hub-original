@@ -1,7 +1,10 @@
+// =========================
+// DASHBOARD LAYOUT (CLEAN FINAL)
+// =========================
+
 import { useState, useMemo, useCallback } from "react";
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
-
-import { authService } from "@/App";
+import { authService } from "@/services/authService";
 import { Button } from "@/components/ui/button";
 
 import {
@@ -25,6 +28,40 @@ import {
 } from "lucide-react";
 
 // =========================
+// ROLE NORMALIZER (KEEP ONLY ONE SOURCE STYLE)
+// =========================
+const normalizeRole = (role) => {
+  if (!role) return "";
+
+  const r = String(role).trim().toLowerCase();
+
+  const map = {
+    admin: "school_admin",
+    schooladmin: "school_admin",
+    school_admin: "school_admin",
+    "school-admin": "school_admin",
+
+    superadmin: "super_admin",
+    super_admin: "super_admin",
+    "super-admin": "super_admin",
+
+    teacher: "teacher",
+
+    finance: "finance",
+    accounts: "finance",
+    accountant: "finance",
+
+    secretary: "secretary",
+
+    student: "student",
+    parent: "student",
+    guardian: "student",
+  };
+
+  return map[r] || r;
+};
+
+// =========================
 // MENU ITEMS
 // =========================
 const MENU_ITEMS = [
@@ -32,129 +69,97 @@ const MENU_ITEMS = [
     icon: LayoutDashboard,
     label: "Dashboard",
     path: "/app/dashboard",
-    roles: ["SUPER_ADMIN", "SCHOOL_ADMIN", "TEACHER", "FINANCE", "SECRETARY"],
+    roles: ["super_admin", "school_admin", "teacher", "finance", "secretary"],
   },
   {
     icon: ShieldCheck,
     label: "Super Admin",
     path: "/app/super-admin",
-    roles: ["SUPER_ADMIN"],
+    roles: ["super_admin"],
   },
-  {
-    icon: Shield,
-    label: "Login Portal",
-    path: "/app/login-portal",
-    roles: ["SCHOOL_ADMIN"],
-  },
-
-  // ✅ FIX ADDED HERE
   {
     icon: Building2,
     label: "School Profile",
     path: "/app/school-profile",
-    roles: ["SCHOOL_ADMIN"],
+    roles: ["school_admin"],
   },
-
   {
     icon: Users,
     label: "Students",
     path: "/app/students",
-    roles: ["SCHOOL_ADMIN", "SECRETARY", "TEACHER"],
+    roles: ["school_admin", "secretary", "teacher"],
   },
   {
     icon: UsersRound,
     label: "Staff",
+    roles: ["super_admin", "school_admin"],
     path: "/app/staff",
-    roles: ["SUPER_ADMIN", "SCHOOL_ADMIN"],
   },
   {
     icon: CreditCard,
     label: "Fees",
     path: "/app/fees",
-    roles: ["SCHOOL_ADMIN", "FINANCE"],
+    roles: ["school_admin", "finance"],
   },
   {
     icon: CalendarCheck,
     label: "Attendance",
     path: "/app/attendance",
-    roles: ["SCHOOL_ADMIN", "TEACHER", "SECRETARY"],
+    roles: ["school_admin", "teacher", "secretary"],
   },
   {
     icon: GraduationCap,
     label: "Exams & Results",
     path: "/app/exams",
-    roles: ["SCHOOL_ADMIN", "TEACHER"],
+    roles: ["school_admin", "teacher"],
   },
   {
     icon: Calendar,
     label: "Timetable",
     path: "/app/timetable",
-    roles: ["SCHOOL_ADMIN", "TEACHER", "STUDENT"],
+    roles: ["school_admin", "teacher", "student"],
   },
   {
     icon: Package,
     label: "Inventory",
     path: "/app/inventory",
-    roles: ["SCHOOL_ADMIN", "SECRETARY"],
+    roles: ["school_admin", "secretary"],
   },
   {
     icon: Bell,
     label: "Announcements",
     path: "/app/announcements",
-    roles: ["SCHOOL_ADMIN", "SECRETARY", "TEACHER", "FINANCE", "STUDENT"],
+    roles: ["school_admin", "secretary", "teacher", "finance", "student"],
   },
   {
     icon: User,
     label: "Teacher Portal",
     path: "/app/teacher-portal",
-    roles: ["TEACHER", "SCHOOL_ADMIN"],
+    roles: ["teacher", "school_admin"],
   },
   {
     icon: CreditCard,
     label: "Finance Portal",
     path: "/app/finance-portal",
-    roles: ["FINANCE", "SCHOOL_ADMIN"],
+    roles: ["finance", "school_admin"],
   },
   {
     icon: FileText,
     label: "Secretary Portal",
     path: "/app/secretary-portal",
-    roles: ["SECRETARY", "SCHOOL_ADMIN"],
+    roles: ["secretary", "school_admin"],
   },
   {
     icon: User,
     label: "Student Portal",
     path: "/app/student-portal",
-    roles: ["STUDENT"],
+    roles: ["student"],
   },
 ];
 
 // =========================
-// ROLE NORMALIZER
+// COMPONENT
 // =========================
-const normalizeRole = (role) => {
-  if (!role) return "";
-
-  const r = String(role).trim().toUpperCase();
-
-  const map = {
-    ADMIN: "SCHOOL_ADMIN",
-    SCHOOLADMIN: "SCHOOL_ADMIN",
-    SCHOOL_ADMIN: "SCHOOL_ADMIN",
-
-    SUPERADMIN: "SUPER_ADMIN",
-    SUPER_ADMIN: "SUPER_ADMIN",
-
-    TEACHER: "TEACHER",
-    FINANCE: "FINANCE",
-    SECRETARY: "SECRETARY",
-    STUDENT: "STUDENT",
-    PARENT: "STUDENT",
-  };
-
-  return map[r] || r;
-};
-
 const DashboardLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -193,10 +198,8 @@ const DashboardLayout = () => {
 
   if (!user || !role) {
     return (
-      <div className="min-h-screen bg-[#0B1220] flex items-center justify-center text-white">
-        <Button onClick={handleLogout}>
-          Session expired. Login again
-        </Button>
+      <div className="min-h-screen flex items-center justify-center text-white">
+        <Button onClick={handleLogout}>Session expired. Login again</Button>
       </div>
     );
   }
@@ -207,27 +210,20 @@ const DashboardLayout = () => {
       {/* SIDEBAR */}
       <aside
         className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-[#0F172A] border-r border-white/5 transition-transform duration-300 flex flex-col ${
-          sidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full lg:translate-x-0"
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
 
         {/* HEADER */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/5">
           <div>
-            <p className="text-white font-semibold text-sm">
-              Smart-M Hub
-            </p>
+            <p className="text-white font-semibold text-sm">Smart-M Hub</p>
             <p className="text-[11px] text-slate-500 uppercase">
               {role.replace("_", " ")}
             </p>
           </div>
 
-          <button
-            className="lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          >
+          <button className="lg:hidden" onClick={() => setSidebarOpen(false)}>
             <X />
           </button>
         </div>
@@ -244,7 +240,7 @@ const DashboardLayout = () => {
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm ${
                   isActive(item.path)
-                    ? "bg-emerald-500/10 text-emerald-400"
+                    ? "text-emerald-400 bg-emerald-500/10"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
@@ -277,10 +273,7 @@ const DashboardLayout = () => {
       <div className="flex-1 flex flex-col">
 
         <header className="h-14 border-b border-white/5 flex items-center justify-between px-4">
-          <button
-            className="lg:hidden"
-            onClick={() => setSidebarOpen(true)}
-          >
+          <button className="lg:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu />
           </button>
 

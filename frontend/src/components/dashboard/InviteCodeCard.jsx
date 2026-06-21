@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-import { API } from "@/App";
+import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 
 export default function InviteCodeCard() {
@@ -9,15 +8,11 @@ export default function InviteCodeCard() {
   useEffect(() => {
     const fetchInvite = async () => {
       try {
-        const res = await axios.get(`${API}/school/invite`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
+        const res = await apiClient.get("/school/invite");
 
         setData(res.data);
       } catch (err) {
-        console.error(err);
+        console.error("Invite fetch error:", err);
       }
     };
 
@@ -30,7 +25,6 @@ export default function InviteCodeCard() {
     const text = `Invite Code: ${data.invite_code}\nJoin Link: ${data.join_link}`;
 
     navigator.clipboard.writeText(text);
-
     toast.success("Invite details copied");
   };
 
@@ -38,9 +32,7 @@ export default function InviteCodeCard() {
 
   return (
     <div className="p-4 bg-[#1A2332] border border-[#1E3A4F] rounded-xl">
-      <h3 className="text-white font-semibold mb-2">
-        School Invite
-      </h3>
+      <h3 className="text-white font-semibold mb-2">School Invite</h3>
 
       <p className="text-slate-300 text-sm">
         <strong>Code:</strong> {data.invite_code}

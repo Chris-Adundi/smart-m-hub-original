@@ -124,7 +124,7 @@ const SchoolProfilePage = () => {
 
         if (!token) {
           toast.error("Authentication expired. Please login again.");
-          window.location.href = "/login";
+          navigate("/login", { replace: true });
           return;
         }
 
@@ -135,7 +135,7 @@ const SchoolProfilePage = () => {
 
         authService.setAuth(token, updatedUser);
 
-        window.location.href = "/app/dashboard";
+       navigate("/app/dashboard", { replace: true });
         return;
       }
 

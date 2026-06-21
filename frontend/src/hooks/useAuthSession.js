@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { authService } from "@/App";
+import { authService } from "@/services/authService";
 
 // =========================
 // ROLE NORMALIZER (SINGLE SOURCE OF TRUTH)
