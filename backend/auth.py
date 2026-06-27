@@ -13,8 +13,14 @@ import os
 # =========================
 # DB
 # =========================
+from dotenv import load_dotenv
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "smart_m_hub")
+DB_NAME = os.getenv("DB_NAME", "test_database")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]

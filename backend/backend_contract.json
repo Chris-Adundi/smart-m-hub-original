@@ -1,0 +1,258 @@
+[
+  {
+    "path": "/openapi.json",
+    "methods": [
+      "HEAD",
+      "GET"
+    ]
+  },
+  {
+    "path": "/docs",
+    "methods": [
+      "HEAD",
+      "GET"
+    ]
+  },
+  {
+    "path": "/docs/oauth2-redirect",
+    "methods": [
+      "HEAD",
+      "GET"
+    ]
+  },
+  {
+    "path": "/redoc",
+    "methods": [
+      "HEAD",
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/payments",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/school/profile",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/school/profile",
+    "methods": [
+      "PATCH"
+    ]
+  },
+  {
+    "path": "/api/school/me",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/dashboard/stats",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/admin/pending-users",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/staff",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/admin/pending",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/admin/approve/{item_type}/{item_id}",
+    "methods": [
+      "PATCH"
+    ]
+  },
+  {
+    "path": "/api/auth/register-school",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/auth/join-school",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/auth/login",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/school/invite",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/schools",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/schools/{school_id}",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/schools/{school_id}",
+    "methods": [
+      "PATCH"
+    ]
+  },
+  {
+    "path": "/api/students",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/students",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/students/{student_id}",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/students/{student_id}",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "path": "/api/students/{student_id}/status",
+    "methods": [
+      "PATCH"
+    ]
+  },
+  {
+    "path": "/api/payments/initiate",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/attendance",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/attendance",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/results",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/results/{student_id}",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/announcements",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/admin/pending",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/finance/request-approval",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/admin/approval-requests",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/students/{student_id}",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "path": "/api/webhooks/mpesa/callback",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/portal/my-data",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/finance/transactions",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/finance/transactions",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/finance/summary",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "path": "/api/admin/progress-students",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "path": "/api/students/{student_id}/history",
+    "methods": [
+      "GET"
+    ]
+  }
+]

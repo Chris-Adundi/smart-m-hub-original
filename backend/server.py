@@ -14,6 +14,9 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone
 
+# =====================================================
+# MODELS
+# =====================================================
 from models import (
     School,
     User,
@@ -38,6 +41,9 @@ from models import (
     CBEGrade
 )
 
+# =====================================================
+# AUTH
+# =====================================================
 from auth import (
     hash_password,
     verify_password,
@@ -45,8 +51,7 @@ from auth import (
     decode_token,
     get_current_user,
     require_roles,
-    login_user,
-    db
+    login_user
 )
 
 # =====================================================
@@ -58,57 +63,42 @@ load_dotenv(ROOT_DIR / ".env")
 # =====================================================
 # DATABASE CONNECTION
 # =====================================================
-mongo_url = os.getenv(
-    "MONGO_URL",
-    "mongodb://localhost:27017"
-)
-
-db_name = os.getenv(
-    "DB_NAME",
-    "smart_m_hub"
-)
+mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+db_name = os.getenv("DB_NAME", "smart_m_hub")
 
 if not isinstance(db_name, str) or not db_name.strip():
-    raise ValueError(
-        "DB_NAME must be a valid string. Check your .env file."
-    )
+    raise ValueError("DB_NAME must be a valid string. Check your .env file.")
 
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
 # =====================================================
-# FASTAPI APP
+# FASTAPI APP SETUP
 # =====================================================
-
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
+        "http://localhost:5173",  # Super Admin (Vite)
+        "http://localhost:3000",  # School Admin (React)
+        "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# =====================================================
-# CORS
-# =====================================================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # DEV ONLY
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # =====================================================
-# ROUTER + SECURITY
+# ROUTERS
 # =====================================================
 api_router = APIRouter(prefix="/api")
-
 security = HTTPBearer()
+
+# 🔥 PLATFORM ROUTER (SUPER ADMIN DASHBOARD)
+from routes.platform import router as platform_router
+app.include_router(platform_router)
 
 # =====================================================
 # LOGGING
@@ -153,8 +143,6 @@ def now_utc():
 
 def now_iso():
     return now_utc().isoformat()
-
-
 # =====================================================
 # SERIALIZATION HELPERS
 # =====================================================
