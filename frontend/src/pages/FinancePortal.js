@@ -104,14 +104,16 @@ const FinancePortal = () => {
         setPayments(
         Array.isArray(paymentsRes?.data)
           ? paymentsRes.data
-          : paymentsRes?.data?.payments ||
+          : paymentsRes?.data?.data ||
+            paymentsRes?.data?.payments ||
             paymentsRes?.data?.results ||
             []
       );
         setTransactions(
         Array.isArray(txnRes?.data)
           ? txnRes.data
-          : txnRes?.data?.transactions ||
+          : txnRes?.data?.data ||
+            txnRes?.data?.transactions ||
             txnRes?.data?.results ||
             []
       );
@@ -148,7 +150,13 @@ const FinancePortal = () => {
       });
 
       const res = await apiClient.get("/finance/transactions");
-      setTransactions(res?.data || []);
+      setTransactions(
+        Array.isArray(res?.data)
+          ? res.data
+          : res?.data?.data ||
+            res?.data?.transactions ||
+            []
+      );
     } catch (error) {
       toast.error(error?.response?.data?.detail || "Failed to record transaction");
     }

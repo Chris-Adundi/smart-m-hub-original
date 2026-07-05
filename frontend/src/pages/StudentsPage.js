@@ -80,7 +80,7 @@ const StudentsPage = () => {
       // ✅ SAFE NORMALIZATION
       const safeStudents = Array.isArray(data)
         ? data
-        : data?.students || [];
+        : data?.data || data?.students || [];
 
       setStudents(safeStudents);
     } catch (err) {

@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import { useParams } from "react-router-dom";
+import { getSchoolDetail } from "../api/platformApi";
 
 export default function SchoolDetails() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { id } = useParams();
 
   useEffect(() => {
     async function load() {
@@ -16,8 +14,8 @@ export default function SchoolDetails() {
         setLoading(true);
         setError("");
 
-        const res = await axios.get(`${API_BASE_URL}/schools/summary`);
-        setData(res.data);
+        const school = await getSchoolDetail(id);
+        setData(school);
       } catch (err) {
         setError(
           err?.response?.data?.detail ||
@@ -30,7 +28,7 @@ export default function SchoolDetails() {
     }
 
     load();
-  }, []);
+  }, [id]);
 
   if (loading) {
     return (
@@ -50,7 +48,27 @@ export default function SchoolDetails() {
 
   return (
     <div style={{ padding: 10 }}>
-      <h2 style={{ marginBottom: 20 }}>School Details</h2>
+      {data?.banner_url && (
+        <img
+          src={data.banner_url}
+          alt={`${data.name} banner`}
+          style={{ width: "100%", height: 180, objectFit: "cover", borderRadius: 12 }}
+        />
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "20px 0" }}>
+        {data?.logo_url && (
+          <img
+            src={data.logo_url}
+            alt={`${data.name} logo`}
+            style={{ width: 72, height: 72, objectFit: "contain", borderRadius: 12 }}
+          />
+        )}
+        <div>
+          <h2 style={{ margin: 0 }}>{data?.name || "School Details"}</h2>
+          <p style={{ margin: "6px 0", color: "#64748b" }}>{data?.motto || ""}</p>
+        </div>
+      </div>
 
       <div
         style={{
@@ -60,18 +78,45 @@ export default function SchoolDetails() {
         }}
       >
         <div style={cardStyle}>
-          <h4>Total Payments</h4>
-          <h2>{data?.totalPayments ?? 0}</h2>
+          <h4>School Code</h4>
+          <h2>{data?.school_code || "Not assigned"}</h2>
         </div>
 
         <div style={cardStyle}>
-          <h4>Total Revenue</h4>
-          <h2>{data?.totalRevenue ?? 0}</h2>
+          <h4>Operation Type</h4>
+          <h2 style={{ textTransform: "capitalize" }}>
+            {(data?.operation_type || "day").replaceAll("_", " ")}
+          </h2>
         </div>
 
         <div style={cardStyle}>
-          <h4>Pending Payments</h4>
-          <h2>{data?.pendingPayments ?? 0}</h2>
+          <h4>Users</h4>
+          <h2>{data?.users_count ?? 0}</h2>
+        </div>
+      </div>
+
+      <div style={{ ...cardStyle, marginTop: 16 }}>
+        <h4>School Login Link</h4>
+        <a href={data?.login_link} target="_blank" rel="noreferrer">
+          {data?.login_link || "Not assigned"}
+        </a>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gap: 16,
+          marginTop: 16,
+        }}
+      >
+        <div style={cardStyle}>
+          <h4>Mission</h4>
+          <p>{data?.mission || "Not set"}</p>
+        </div>
+        <div style={cardStyle}>
+          <h4>Vision</h4>
+          <p>{data?.vision || "Not set"}</p>
         </div>
       </div>
     </div>

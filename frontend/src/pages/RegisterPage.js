@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient } from "@/App";
+import { apiClient, authService } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 import {
   Card,
@@ -41,6 +42,22 @@ const RegisterPage = () => {
     phone: "",
     email: "",
     school_type: "",
+    school_classification: "",
+    operation_type: "day",
+    logo_url: "",
+    banner_url: "",
+    theme_primary: "#10B981",
+    theme_secondary: "#0F172A",
+    motto: "",
+    vision: "",
+    mission: "",
+    website: "",
+    principal_name: "",
+    principal_email: "",
+    principal_phone: "",
+    school_registration_number: "",
+    ministry_registration_number: "",
+    kra_pin: "",
     admin_name: "",
     admin_email: "",
     admin_phone: "",
@@ -50,6 +67,8 @@ const RegisterPage = () => {
   const [loading, setLoading] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [joinLink, setJoinLink] = useState("");
+  const [schoolCode, setSchoolCode] = useState("");
+  const [loginLink, setLoginLink] = useState("");
   const [registered, setRegistered] = useState(false);
 
   const updateField = (field, value) => {
@@ -73,6 +92,16 @@ const RegisterPage = () => {
 
     if (!formData.school_type) {
       toast.error("Please select school type");
+      return;
+    }
+
+    if (!formData.school_classification) {
+      toast.error("Please select school classification");
+      return;
+    }
+
+    if (!formData.operation_type) {
+      toast.error("Please select school operation type");
       return;
     }
 
@@ -114,9 +143,16 @@ const RegisterPage = () => {
 
       setInviteCode(code);
       setJoinLink(link);
+      setSchoolCode(data.school_code || "");
+      setLoginLink(data.login_link || "");
       setRegistered(true);
 
       toast.success("School registered successfully");
+
+      if (data.access_token && data.user) {
+        authService.setAuth(data.access_token, data.user);
+        navigate("/app/school-profile", { replace: true });
+      }
     } catch (error) {
       toast.error(
         error?.response?.data?.detail ||
@@ -156,6 +192,30 @@ const RegisterPage = () => {
 
                 <div className="font-semibold text-lg">
                   School Registered Successfully
+                </div>
+
+                <div>
+                  <div className="text-sm mb-1 text-slate-300">
+                    School Code
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={schoolCode} readOnly className="bg-slate-900 text-white" />
+                    <Button type="button" onClick={() => copyToClipboard(schoolCode)}>
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm mb-1 text-slate-300">
+                    School Login Link
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={loginLink} readOnly className="bg-slate-900 text-white" />
+                    <Button type="button" onClick={() => copyToClipboard(loginLink)}>
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 <div>
@@ -258,6 +318,249 @@ const RegisterPage = () => {
                   </Select>
                 </div>
 
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>School Classification</Label>
+                  <Select
+                    value={formData.school_classification}
+                    onValueChange={(value) =>
+                      updateField("school_classification", value)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select classification" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="public">Public</SelectItem>
+                      <SelectItem value="private">Private</SelectItem>
+                      <SelectItem value="international">International</SelectItem>
+                      <SelectItem value="special">Special School</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Operation Type</Label>
+                  <Select
+                    value={formData.operation_type}
+                    onValueChange={(value) =>
+                      updateField("operation_type", value)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select operation type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">Day School</SelectItem>
+                      <SelectItem value="boarding">Boarding School</SelectItem>
+                      <SelectItem value="mixed">Mixed Day & Boarding</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>School Email</Label>
+                  <Input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => updateField("email", e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label>School Phone</Label>
+                  <Input
+                    value={formData.phone}
+                    onChange={(e) => updateField("phone", e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Physical Address</Label>
+                <Textarea
+                  value={formData.address}
+                  onChange={(e) => updateField("address", e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Logo URL</Label>
+                  <Input
+                    type="url"
+                    value={formData.logo_url}
+                    onChange={(e) => updateField("logo_url", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Banner URL</Label>
+                  <Input
+                    type="url"
+                    value={formData.banner_url}
+                    onChange={(e) => updateField("banner_url", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Primary Theme Color</Label>
+                  <Input
+                    type="color"
+                    value={formData.theme_primary}
+                    onChange={(e) => updateField("theme_primary", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Secondary Theme Color</Label>
+                  <Input
+                    type="color"
+                    value={formData.theme_secondary}
+                    onChange={(e) => updateField("theme_secondary", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>School Motto</Label>
+                  <Input
+                    value={formData.motto}
+                    onChange={(e) => updateField("motto", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Website</Label>
+                  <Input
+                    value={formData.website}
+                    onChange={(e) => updateField("website", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>School Registration Number</Label>
+                  <Input
+                    value={formData.school_registration_number}
+                    onChange={(e) =>
+                      updateField("school_registration_number", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <Label>Ministry Registration Number</Label>
+                  <Input
+                    value={formData.ministry_registration_number}
+                    onChange={(e) =>
+                      updateField("ministry_registration_number", e.target.value)
+                    }
+                  />
+                </div>
+
+                <div>
+                  <Label>KRA PIN</Label>
+                  <Input
+                    value={formData.kra_pin}
+                    onChange={(e) => updateField("kra_pin", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Principal Name</Label>
+                  <Input
+                    value={formData.principal_name}
+                    onChange={(e) => updateField("principal_name", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Principal Email</Label>
+                  <Input
+                    type="email"
+                    value={formData.principal_email}
+                    onChange={(e) => updateField("principal_email", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Principal Phone</Label>
+                  <Input
+                    value={formData.principal_phone}
+                    onChange={(e) => updateField("principal_phone", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Vision</Label>
+                  <Textarea
+                    value={formData.vision}
+                    onChange={(e) => updateField("vision", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Mission</Label>
+                  <Textarea
+                    value={formData.mission}
+                    onChange={(e) => updateField("mission", e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="font-semibold text-lg text-white">
+                School Admin Account
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Admin Full Name</Label>
+                  <Input
+                    value={formData.admin_name}
+                    onChange={(e) => updateField("admin_name", e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label>Admin Email</Label>
+                  <Input
+                    type="email"
+                    value={formData.admin_email}
+                    onChange={(e) => updateField("admin_email", e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label>Admin Phone</Label>
+                  <Input
+                    value={formData.admin_phone}
+                    onChange={(e) => updateField("admin_phone", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label>Admin Password</Label>
+                  <Input
+                    type="password"
+                    value={formData.admin_password}
+                    onChange={(e) => updateField("admin_password", e.target.value)}
+                    required
+                  />
+                </div>
               </div>
             </div>
 

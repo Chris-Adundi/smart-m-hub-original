@@ -47,6 +47,12 @@ import {
    SAFE ARRAY HELPER
 ========================= */
 const asArray = (data) => (Array.isArray(data) ? data : []);
+const apiList = (payload, key) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (key && Array.isArray(payload?.[key])) return payload[key];
+  return [];
+};
 
 /* =========================
    ROLE NORMALIZER
@@ -132,9 +138,9 @@ const TeacherPortal = () => {
         apiClient.get("/attendance").catch(() => ({ data: [] })),
       ]);
 
-      setStudents(asArray(studentsRes?.data));
-      setExams(asArray(examsRes?.data));
-      setAttendance(asArray(attendanceRes?.data));
+      setStudents(apiList(studentsRes?.data, "students"));
+      setExams(apiList(examsRes?.data, "exams"));
+      setAttendance(apiList(attendanceRes?.data, "attendance"));
     } catch (err) {
       toast.error("Failed to load teacher data");
       setStudents([]);

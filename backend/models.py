@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator
 from typing import Optional, List
 from datetime import datetime, timezone
 from enum import Enum
@@ -112,10 +112,36 @@ class School(BaseModel):
     phone: str
     email: EmailStr
     school_type: Optional[SchoolType] = None
+    school_classification: Optional[str] = None
+    operation_type: str = "day"
+    boarding_enabled: bool = False
 
     password_hash: Optional[str] = None
 
     invite_code: str = Field(default_factory=lambda: str(uuid.uuid4())[:8].upper())
+    school_code: Optional[str] = None
+    slug: Optional[str] = None
+    invite_link: Optional[str] = None
+    login_link: Optional[str] = None
+
+    logo_url: Optional[str] = None
+    banner_url: Optional[str] = None
+    stamp_url: Optional[str] = None
+    motto: Optional[str] = None
+    vision: Optional[str] = None
+    mission: Optional[str] = None
+    principal_name: Optional[str] = None
+    principal_email: Optional[EmailStr] = None
+    principal_phone: Optional[str] = None
+    website: Optional[str] = None
+    established_year: Optional[str] = None
+    school_registration_number: Optional[str] = None
+    ministry_registration_number: Optional[str] = None
+    kra_pin: Optional[str] = None
+    theme: dict = Field(default_factory=lambda: {
+        "primary": "#10B981",
+        "secondary": "#0F172A"
+    })
 
     status: str = "active"
 
@@ -126,6 +152,15 @@ class School(BaseModel):
 
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)
+
+    @model_validator(mode="after")
+    def synchronize_operation_type(self):
+        operation_type = str(self.operation_type or "day").lower().strip()
+        if operation_type not in {"day", "boarding", "mixed"}:
+            raise ValueError("operation_type must be day, boarding, or mixed")
+        self.operation_type = operation_type
+        self.boarding_enabled = operation_type in {"boarding", "mixed"}
+        return self
 
 
 # =========================

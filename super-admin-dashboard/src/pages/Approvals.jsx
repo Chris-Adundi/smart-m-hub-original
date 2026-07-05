@@ -1,32 +1,17 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import api from "../api/platformApi";
 
 export default function Approvals() {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const getHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-  });
-
   async function load() {
     try {
       setLoading(true);
       setError("");
 
-     console.log("API URL =", `${API_BASE_URL}/schools/pending`);
-
-  const res = await axios.get(
-    `${API_BASE_URL}/schools/pending`,
-    {
-      headers: getHeaders(),
-    }
-  );
+      const res = await api.get("/schools/pending");
 
       setSchools(res.data?.schools || []);
     } catch (err) {
@@ -46,13 +31,7 @@ export default function Approvals() {
 
   async function approve(id) {
     try {
-      await axios.patch(
-        `${API_BASE_URL}/schools/${id}/approve`,
-        {},
-        {
-          headers: getHeaders(),
-        }
-      );
+      await api.patch(`/schools/${id}/approve`, {});
 
       await load();
     } catch (err) {

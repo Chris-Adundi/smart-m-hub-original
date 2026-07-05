@@ -7,6 +7,7 @@ import {
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 import {
   Tabs,
@@ -28,6 +29,8 @@ import {
   ClipboardCheck,
   GraduationCap,
   CreditCard,
+  Copy,
+  Building2,
 } from "lucide-react";
 
 // =========================
@@ -110,6 +113,7 @@ const Dashboard = () => {
 
   const [approvalLoading, setApprovalLoading] =
     useState(false);
+  const [schoolIdentity, setSchoolIdentity] = useState(null);
 
   // =========================
 // SAFE USER
@@ -147,6 +151,25 @@ const isSecretary = role === "secretary";
 
 const isStudent =
   role === "student" || role === "parent";
+
+  useEffect(() => {
+    if (!isSchoolAdmin) return;
+
+    apiClient
+      .get("/school/profile")
+      .then((response) => setSchoolIdentity(response?.data?.data || null))
+      .catch(() => setSchoolIdentity(null));
+  }, [isSchoolAdmin]);
+
+  const copyIdentity = async (value, label) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error(`Unable to copy ${label.toLowerCase()}`);
+    }
+  };
   // =========================
   // FETCH DASHBOARD DATA
   // =========================
@@ -193,27 +216,49 @@ const isStudent =
             const data =
               res?.data || {};
 
+            const nested =
+              data?.data || {};
+
+            const nestedUsers =
+              nested?.users || {};
+
+            const nestedOps =
+              nested?.operations || {};
+
             setPending({
               pending_users:
-                data.pending_users || [],
+                data.pending_users ||
+                nestedUsers.pending ||
+                [],
 
               results:
-                data.results || [],
+                data.results ||
+                nestedOps.results ||
+                [],
 
               attendance:
-                data.attendance || [],
+                data.attendance ||
+                nestedOps.attendance ||
+                [],
 
               payments:
-                data.payments || [],
+                data.payments ||
+                nestedOps.payments ||
+                [],
 
               announcements:
-                data.announcements || [],
+                data.announcements ||
+                nestedOps.announcements ||
+                [],
 
               inventory:
-                data.inventory || [],
+                data.inventory ||
+                nestedOps.inventory ||
+                [],
 
               totals:
-                data.totals || {
+                data.totals ||
+                nested.totals || {
                   all_pending_operations: 0,
                 },
             });
@@ -318,6 +363,7 @@ const isStudent =
       <div className="flex items-center justify-center h-[70vh]">
         <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
       </div>
+
     );
   }
 
@@ -457,6 +503,61 @@ const isStudent =
         </p>
 
       </div>
+
+      {isSchoolAdmin && schoolIdentity && (
+        <Card
+          className="border-white/10 overflow-hidden"
+          style={{
+            borderColor: `${schoolIdentity?.theme?.primary || "#10B981"}55`,
+          }}
+        >
+          <CardContent className="p-5 grid lg:grid-cols-[auto_1fr_1fr] gap-5 items-center">
+            <div className="flex items-center gap-3">
+              {schoolIdentity.logo_url || schoolIdentity.logo ? (
+                <img
+                  src={schoolIdentity.logo_url || schoolIdentity.logo}
+                  alt={`${schoolIdentity.name} logo`}
+                  className="w-14 h-14 object-contain rounded-xl bg-white/10"
+                />
+              ) : (
+                <Building2 className="w-12 h-12 text-slate-400" />
+              )}
+              <div>
+                <p className="font-semibold text-white">{schoolIdentity.name}</p>
+                <p className="text-xs text-slate-400 capitalize">
+                  {(schoolIdentity.operation_type || "day").replaceAll("_", " ")} school
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400 mb-1">School Code</p>
+              <div className="flex gap-2">
+                <Input value={schoolIdentity.school_code || ""} readOnly />
+                <Button
+                  variant="outline"
+                  onClick={() => copyIdentity(schoolIdentity.school_code, "School code")}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-400 mb-1">School Login Link</p>
+              <div className="flex gap-2">
+                <Input value={schoolIdentity.login_link || ""} readOnly />
+                <Button
+                  variant="outline"
+                  onClick={() => copyIdentity(schoolIdentity.login_link, "Login link")}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ROLE CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

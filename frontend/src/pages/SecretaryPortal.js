@@ -50,6 +50,7 @@ const SecretaryPortal = () => {
 
   const normalizeArray = (data, fallbackKey) => {
     if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
     if (Array.isArray(data?.[fallbackKey])) return data[fallbackKey];
     return [];
   };

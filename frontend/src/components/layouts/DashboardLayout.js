@@ -2,7 +2,7 @@
 // DASHBOARD LAYOUT (CLEAN FINAL)
 // =========================
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { authService } from "@/services/authService";
 import { Button } from "@/components/ui/button";
@@ -178,6 +178,58 @@ const DashboardLayout = () => {
   }, [rawUser]);
 
   const role = user?.role || "";
+  const [branding, setBranding] = useState(user?.school_branding || null);
+
+  useEffect(() => {
+    if (!user?.school_id || role === "super_admin") return;
+
+    let active = true;
+    const backendUrl =
+      process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
+
+    fetch(`${backendUrl.replace(/\/$/, "")}/api/school/profile`, {
+      headers: {
+        Authorization: `Bearer ${authService.getToken()}`,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load school branding");
+        return response.json();
+      })
+      .then((payload) => {
+        if (!active || !payload?.data) return;
+
+        const school = payload.data;
+        const nextBranding = {
+          id: school.id,
+          name: school.name,
+          school_code: school.school_code,
+          login_link: school.login_link,
+          operation_type: school.operation_type,
+          logo_url: school.logo_url || school.logo,
+          banner_url: school.banner_url,
+          motto: school.motto,
+          mission: school.mission,
+          vision: school.vision,
+          theme: school.theme,
+        };
+
+        setBranding(nextBranding);
+        authService.setAuth(authService.getToken(), {
+          ...(authService.getUser() || {}),
+          school_name: school.name,
+          school_code: school.school_code,
+          school_branding: nextBranding,
+        });
+      })
+      .catch(() => {
+        // Existing session branding remains the safe fallback.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [role, user?.school_id]);
 
   const handleLogout = useCallback(() => {
     authService.clearAuth();
@@ -196,6 +248,9 @@ const DashboardLayout = () => {
     return MENU_ITEMS.filter((item) => item.roles.includes(role));
   }, [role]);
 
+  const primaryColor = branding?.theme?.primary || "#10B981";
+  const secondaryColor = branding?.theme?.secondary || "#0B1220";
+
   if (!user || !role) {
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
@@ -205,7 +260,10 @@ const DashboardLayout = () => {
   }
 
   return (
-    <div className="flex h-screen bg-[#0B1220] text-slate-200 overflow-hidden">
+    <div
+      className="flex h-screen text-slate-200 overflow-hidden"
+      style={{ backgroundColor: secondaryColor }}
+    >
 
       {/* SIDEBAR */}
       <aside
@@ -216,11 +274,22 @@ const DashboardLayout = () => {
 
         {/* HEADER */}
         <div className="h-16 flex items-center justify-between px-5 border-b border-white/5">
-          <div>
-            <p className="text-white font-semibold text-sm">Smart-M Hub</p>
-            <p className="text-[11px] text-slate-500 uppercase">
-              {role.replace("_", " ")}
+          <div className="flex items-center gap-3 min-w-0">
+            {branding?.logo_url && (
+              <img
+                src={branding.logo_url}
+                alt={`${branding.name || "School"} logo`}
+                className="w-9 h-9 rounded-lg object-contain bg-white/10"
+              />
+            )}
+            <div className="min-w-0">
+            <p className="text-white font-semibold text-sm truncate">
+              {branding?.name || "Smart-M Hub"}
             </p>
+            <p className="text-[11px] text-slate-500 uppercase">
+              {branding?.school_code || role.replace("_", " ")}
+            </p>
+            </div>
           </div>
 
           <button className="lg:hidden" onClick={() => setSidebarOpen(false)}>
@@ -239,10 +308,13 @@ const DashboardLayout = () => {
                 to={item.path}
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm ${
-                  isActive(item.path)
-                    ? "text-emerald-400 bg-emerald-500/10"
-                    : "text-slate-400 hover:text-white"
+                  isActive(item.path) ? "" : "text-slate-400 hover:text-white"
                 }`}
+                style={
+                  isActive(item.path)
+                    ? { color: primaryColor, backgroundColor: `${primaryColor}1A` }
+                    : undefined
+                }
               >
                 <Icon className="w-4 h-4" />
                 {item.label}
@@ -272,19 +344,40 @@ const DashboardLayout = () => {
       {/* MAIN */}
       <div className="flex-1 flex flex-col">
 
-        <header className="h-14 border-b border-white/5 flex items-center justify-between px-4">
+        <header
+          className="min-h-14 border-b border-white/5 flex items-center justify-between px-4 py-2 bg-cover bg-center relative"
+          style={
+            branding?.banner_url
+              ? {
+                  backgroundImage: `linear-gradient(rgba(15,23,42,.86), rgba(15,23,42,.86)), url("${branding.banner_url}")`,
+                }
+              : undefined
+          }
+        >
           <button className="lg:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu />
           </button>
 
-          <div className="text-sm text-slate-300">
-            Welcome, {user.full_name}
+          <div className="text-sm text-slate-300 text-center">
+            <p>Welcome, {user.full_name}</p>
+            {branding?.motto && (
+              <p className="text-xs italic" style={{ color: primaryColor }}>
+                {branding.motto}
+              </p>
+            )}
           </div>
 
-          <div className="text-emerald-400 text-xs uppercase">
+          <div className="text-xs uppercase" style={{ color: primaryColor }}>
             {role.replace("_", " ")}
           </div>
         </header>
+
+        {(branding?.mission || branding?.vision) && (
+          <div className="px-4 py-1.5 border-b border-white/5 text-[11px] text-slate-400 flex gap-6 overflow-hidden">
+            {branding?.mission && <p className="truncate">Mission: {branding.mission}</p>}
+            {branding?.vision && <p className="truncate">Vision: {branding.vision}</p>}
+          </div>
+        )}
 
         <main className="flex-1 overflow-auto p-4">
           <Outlet />

@@ -57,6 +57,7 @@ const FeesPage = () => {
 
   const normalizePayments = (data) => {
     if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
     if (Array.isArray(data?.payments)) return data.payments;
     return [];
   };

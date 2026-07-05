@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../api/platformApi";
 
 export default function DashboardHome() {
   const [metrics, setMetrics] = useState(null);
@@ -8,16 +8,7 @@ export default function DashboardHome() {
   useEffect(() => {
     async function loadMetrics() {
       try {
-        const token = localStorage.getItem("access_token");
-
-        const res = await axios.get(
-          "http://127.0.0.1:8000/api/platform/metrics",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const res = await api.get("/metrics");
 
         setMetrics(res.data);
       } catch (err) {

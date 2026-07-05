@@ -65,6 +65,8 @@ export default function Schools() {
             <thead>
               <tr style={{ background: "#f9fafb" }}>
                 <th style={thStyle}>Name</th>
+                <th style={thStyle}>School Code</th>
+                <th style={thStyle}>Operation</th>
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}>Created</th>
                 <th style={thStyle}>Action</th>
@@ -75,6 +77,10 @@ export default function Schools() {
               {schools.map((s) => (
                 <tr key={s.id}>
                   <td style={tdStyle}>{s.name}</td>
+                  <td style={tdStyle}>{s.school_code || "Not assigned"}</td>
+                  <td style={{ ...tdStyle, textTransform: "capitalize" }}>
+                    {(s.operation_type || "day").replaceAll("_", " ")}
+                  </td>
 
                   <td style={tdStyle}>
                     {s.is_active ? (

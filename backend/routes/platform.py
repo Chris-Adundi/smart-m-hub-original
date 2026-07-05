@@ -3,11 +3,46 @@ from bson import ObjectId
 
 from auth import get_current_user, require_roles, db
 from datetime import datetime, timezone
-from fastapi import Depends, HTTPException, status
-from auth import get_current_user
-from fastapi import Depends, HTTPException, status
-from auth import get_current_user
-from datetime import datetime, timezone
+
+
+def school_lookup(school_id: str):
+    conditions = [{"id": school_id}]
+    if ObjectId.is_valid(school_id):
+        conditions.append({"_id": ObjectId(school_id)})
+    return {"$or": conditions}
+
+
+def serialize_school(school: dict):
+    theme = school.get("theme") or {}
+    return {
+        "id": str(school.get("id") or school.get("_id")),
+        "mongo_id": str(school.get("_id")) if school.get("_id") else None,
+        "name": school.get("name"),
+        "school_code": school.get("school_code"),
+        "login_link": school.get("login_link"),
+        "school_type": school.get("school_type"),
+        "school_classification": school.get("school_classification"),
+        "operation_type": school.get("operation_type", "day"),
+        "boarding_enabled": bool(school.get("boarding_enabled", False)),
+        "email": school.get("email"),
+        "phone": school.get("phone"),
+        "address": school.get("address"),
+        "logo_url": school.get("logo_url") or school.get("logo"),
+        "banner_url": school.get("banner_url"),
+        "motto": school.get("motto"),
+        "mission": school.get("mission"),
+        "vision": school.get("vision"),
+        "theme": {
+            "primary": theme.get("primary") or "#10B981",
+            "secondary": theme.get("secondary") or "#0F172A"
+        },
+        "approval_status": school.get("approval_status"),
+        "subscription_status": school.get("subscription_status"),
+        "status": school.get("status"),
+        "is_active": school.get("is_active", False),
+        "created_at": school.get("created_at"),
+        "updated_at": school.get("updated_at")
+    }
 
 async def log_action(action, user, school_id=None):
     await db["audit_logs"].insert_one({
@@ -30,7 +65,7 @@ def require_super_admin(user=Depends(get_current_user)):
 # PLATFORM METRICS
 # =====================================================
 @router.get("/metrics")
-async def get_platform_metrics():
+async def get_platform_metrics(user=Depends(require_super_admin)):
     schools_col = db["schools"]
     users_col = db["users"]
     payments_col = db["payments"]
@@ -76,12 +111,7 @@ async def get_all_schools(current_user=Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Super admin access required")
     schools = []
     async for s in db["schools"].find():
-        schools.append({
-            "id": str(s.get("_id")),
-            "name": s.get("name"),
-            "is_active": s.get("is_active", False),
-            "created_at": s.get("created_at")
-        })
+        schools.append(serialize_school(s))
 
     return {
         "count": len(schools),
@@ -94,17 +124,12 @@ async def get_all_schools(current_user=Depends(get_current_user)):
 # =====================================================
 
 @router.get("/schools/pending")
-async def get_pending_schools(current_user=Depends(get_current_user)):
-    print("CURRENT USER =", current_user)
+async def get_pending_schools(current_user=Depends(require_super_admin)):
 
     schools = []
 
     async for s in db["schools"].find({"approval_status": "pending"}):
-        schools.append({
-            "id": str(s.get("_id")),
-            "name": s.get("name"),
-            "created_at": s.get("created_at")
-        })
+        schools.append(serialize_school(s))
 
     return {
         "current_user": current_user,
@@ -117,20 +142,19 @@ async def get_school_detail(school_id: str, current_user=Depends(get_current_use
     if current_user["role"] != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin access required")
 
-    school = await db["schools"].find_one({"_id": ObjectId(school_id)})
+    school = await db["schools"].find_one(school_lookup(school_id))
 
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
 
-    users_count = await db["users"].count_documents({"school_id": school_id})
+    canonical_school_id = str(school.get("id") or school_id)
+    users_count = await db["users"].count_documents({
+        "school_id": canonical_school_id
+    })
 
-    return {
-        "id": str(school["_id"]),
-        "name": school.get("name"),
-        "is_active": school.get("is_active"),
-        "users_count": users_count,
-        "created_at": school.get("created_at")
-    }
+    result = serialize_school(school)
+    result["users_count"] = users_count
+    return result
 
 
 # =====================================================
@@ -141,7 +165,7 @@ async def toggle_school_status(school_id: str, current_user=Depends(get_current_
     if current_user["role"] != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin access required")
 
-    school = await db["schools"].find_one({"_id": ObjectId(school_id)})
+    school = await db["schools"].find_one(school_lookup(school_id))
 
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
@@ -149,7 +173,7 @@ async def toggle_school_status(school_id: str, current_user=Depends(get_current_
     new_status = not school.get("is_active", False)
 
     await db["schools"].update_one(
-        {"_id": ObjectId(school_id)},
+        {"_id": school["_id"]},
         {"$set": {"is_active": new_status}}
     )
 
@@ -164,13 +188,13 @@ async def approve_school(school_id: str, current_user=Depends(get_current_user))
     if current_user["role"] != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin access required")
 
-    school = await db["schools"].find_one({"_id": ObjectId(school_id)})
+    school = await db["schools"].find_one(school_lookup(school_id))
 
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
 
     await db["schools"].update_one(
-        {"_id": ObjectId(school_id)},
+        {"_id": school["_id"]},
         {"$set": {"approval_status": "approved", "is_active": True}}
     )
 
@@ -179,8 +203,7 @@ async def approve_school(school_id: str, current_user=Depends(get_current_user))
 
 
 @router.get("/payments/summary")
-async def payment_summary(current_user=Depends(get_current_user)):
-    print("PAYMENTS USER =", current_user)
+async def payment_summary(current_user=Depends(require_super_admin)):
 
     payments = db["payments"]
 
@@ -217,7 +240,7 @@ async def payment_summary(current_user=Depends(get_current_user)):
     }
 
 @router.get("/support-tickets")
-async def get_tickets():
+async def get_tickets(user=Depends(require_super_admin)):
     tickets = []
     async for t in db["support_tickets"].find():
         tickets.append({
@@ -230,22 +253,8 @@ async def get_tickets():
     return tickets
 
 
-@router.get("/audit-logs")
-async def get_audit_logs():
-    logs = []
-    async for log in db["audit_logs"].find().sort("timestamp", -1).limit(100):
-        logs.append({
-            "id": str(log.get("_id")),
-            "action": log.get("action"),
-            "performed_by": log.get("performed_by"),
-            "school_id": log.get("school_id"),
-            "timestamp": log.get("timestamp")
-        })
-    return logs
-
-
 @router.get("/revenue")
-async def get_revenue():
+async def get_revenue(user=Depends(require_super_admin)):
     total = 0
     pending = 0
 
@@ -264,7 +273,7 @@ async def get_revenue():
 
 
 @router.post("/support-tickets")
-async def create_ticket(data: dict):
+async def create_ticket(data: dict, user=Depends(require_super_admin)):
     ticket = {
         "school_id": data.get("school_id"),
         "message": data.get("message"),
@@ -276,7 +285,7 @@ async def create_ticket(data: dict):
 
     return {"message": "Ticket created successfully", "ticket_id": str(ticket.get("_id"))}
 @router.patch("/support-tickets/{ticket_id}")
-async def update_ticket(ticket_id: str, data: dict):
+async def update_ticket(ticket_id: str, data: dict, user=Depends(require_super_admin)):
     await db["support_tickets"].update_one(
         {"_id": ticket_id},
         {"$set": {"status": data.get("status")}}
@@ -286,7 +295,7 @@ async def update_ticket(ticket_id: str, data: dict):
 
 
 @router.get("/alerts")
-async def system_alerts():
+async def system_alerts(user=Depends(require_super_admin)):
     alerts = []
 
     inactive_schools = await db["schools"].count_documents({"is_active": False})
@@ -310,8 +319,12 @@ async def system_alerts():
 
 @router.patch("/schools/{school_id}/subscription")
 async def update_subscription(school_id: str, data: dict, user=Depends(require_super_admin)):
+    school = await db["schools"].find_one(school_lookup(school_id))
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
     await db["schools"].update_one(
-        {"_id": school_id},
+        {"_id": school["_id"]},
         {
             "$set": {
                 "subscription_status": data.get("status"),

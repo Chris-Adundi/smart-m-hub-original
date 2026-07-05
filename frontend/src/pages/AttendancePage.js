@@ -50,7 +50,7 @@ const AttendancePage = () => {
 
       const safeStudents = Array.isArray(data)
         ? data
-        : data?.students || [];
+        : data?.data || data?.students || [];
 
       setStudents(safeStudents);
     } catch (error) {
@@ -70,7 +70,7 @@ const AttendancePage = () => {
 
       const safeAttendance = Array.isArray(data)
         ? data
-        : data?.attendance || [];
+        : data?.data || data?.attendance || [];
 
       setAttendance(safeAttendance);
     } catch (error) {

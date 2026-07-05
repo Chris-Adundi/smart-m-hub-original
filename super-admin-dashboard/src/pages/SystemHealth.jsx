@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import api from "../api/platformApi";
 
 export default function SystemHealth() {
   const [health, setHealth] = useState(null);
@@ -16,18 +12,7 @@ export default function SystemHealth() {
         setLoading(true);
         setError("");
 
-        const token = localStorage.getItem("access_token");
-
-        console.log("TOKEN =", token);
-
-        const res = await axios.get(
-          `${API_BASE_URL}/system-health`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const res = await api.get("/system-health");
         setHealth(res.data);
       } catch (err) {
         setError(

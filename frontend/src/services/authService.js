@@ -63,6 +63,13 @@ export const authService = {
       ...user,
       role: normalizeRole(user?.role),
       school_id: user?.school_id ? String(user.school_id) : null,
+      school_code: user?.school_code
+        ? String(user.school_code).trim().toUpperCase()
+        : null,
+      school_branding:
+        user?.school_branding && typeof user.school_branding === "object"
+          ? user.school_branding
+          : null,
     };
 
     localStorage.setItem(TOKEN_KEY, token);

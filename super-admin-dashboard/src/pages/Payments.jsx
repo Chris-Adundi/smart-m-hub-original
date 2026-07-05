@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import api from "../api/platformApi";
 
 export default function Payments() {
   const [data, setData] = useState(null);
@@ -16,16 +12,7 @@ export default function Payments() {
         setLoading(true);
         setError("");
 
-        const token = localStorage.getItem("access_token");
-        console.log("API URL =", `${API_BASE_URL}/payments/summary`);
-        const res = await axios.get(
-          `${API_BASE_URL}/payments/summary`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const res = await api.get("/payments/summary");
 
         setData(res.data);
       } catch (err) {

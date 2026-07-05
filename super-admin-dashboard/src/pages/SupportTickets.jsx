@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import api from "../api/platformApi";
 
 export default function SupportTickets() {
   const [tickets, setTickets] = useState([]);
@@ -15,18 +11,7 @@ export default function SupportTickets() {
       try {
         setLoading(true);
 
-        const token = localStorage.getItem("access_token");
-
-        console.log("TOKEN =", token);
-
-        const res = await axios.get(
-          `${API_BASE_URL}/support-tickets`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const res = await api.get("/support-tickets");
 
         setTickets(res.data || []);
       } catch (err) {

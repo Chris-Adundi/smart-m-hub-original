@@ -121,6 +121,8 @@ const ExamsPage = () => {
 
       if (Array.isArray(data)) {
         setExams(data);
+      } else if (Array.isArray(data?.data)) {
+        setExams(data.data);
       } else if (Array.isArray(data?.items)) {
         setExams(data.items);
       } else {

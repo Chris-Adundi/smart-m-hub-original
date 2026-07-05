@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+import api from "../api/platformApi";
 
 export default function Analytics() {
   const [stats, setStats] = useState(null);
@@ -16,7 +12,7 @@ export default function Analytics() {
         setLoading(true);
         setError("");
 
-        const res = await axios.get(`${API_BASE_URL}/metrics`);
+        const res = await api.get("/metrics");
         setStats(res.data);
       } catch (err) {
         setError(

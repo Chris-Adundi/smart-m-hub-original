@@ -161,9 +161,11 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
 
   const [formData, setFormData] = useState({
+    school_code: new URLSearchParams(location.search).get("school") || "",
     email: "",
     password: "",
   });
+  const [resolvedSchool, setResolvedSchool] = useState(null);
   const query = new URLSearchParams(location.search);
   const joinCode = query.get("code");
   const params = useParams();
@@ -206,6 +208,32 @@ const schoolSlug =
 const selectedRoleData = roles.find(
   (r) => r.key === selectedRole
 );
+
+  useEffect(() => {
+    const schoolCode = formData.school_code.trim().toUpperCase();
+
+    if (!/^SMH-KE-\d{6}$/.test(schoolCode)) {
+      setResolvedSchool(null);
+      return;
+    }
+
+    let active = true;
+    const resolveSchool = async () => {
+      try {
+        const response = await apiClient.get(
+          `/public/schools/resolve/${encodeURIComponent(schoolCode)}`
+        );
+        if (active) setResolvedSchool(response?.data?.data || null);
+      } catch {
+        if (active) setResolvedSchool(null);
+      }
+    };
+
+    resolveSchool();
+    return () => {
+      active = false;
+    };
+  }, [formData.school_code]);
   // ========================================
   // LOGIN SUBMIT
   // ========================================
@@ -238,6 +266,14 @@ const selectedRoleData = roles.find(
       return;
     }
 
+    if (
+      finalRole !== "super_admin" &&
+      !/^SMH-KE-\d{6}$/.test(formData.school_code.trim().toUpperCase())
+    ) {
+      toast.error("Enter a valid school code, for example SMH-KE-000021");
+      return;
+    }
+
     // ========================================
     // PASSWORD CLEANUP
     // ========================================
@@ -267,6 +303,10 @@ const selectedRoleData = roles.find(
         {
           email: formData.email.trim().toLowerCase(),
           password: cleanPassword,
+          school_code:
+            finalRole === "super_admin"
+              ? null
+              : formData.school_code.trim().toUpperCase(),
         }
       );
 
@@ -341,6 +381,12 @@ const selectedRoleData = roles.find(
           backendUser.school_code ||
           backendUser.schoolCode ||
           "",
+
+        school_branding:
+          backendUser.school_branding ||
+          responseData.school ||
+          resolvedSchool ||
+          null,
 
         approval_status:
           approvalStatus,
@@ -498,21 +544,33 @@ const selectedRoleData = roles.find(
         {/* HEADER */}
         <div className="text-center mb-8">
 
-          <div className="mx-auto w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mb-4">
-            <GraduationCap className="w-10 h-10 text-white" />
+          <div
+            className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center mb-4 overflow-hidden"
+            style={{ backgroundColor: resolvedSchool?.theme?.primary || "#059669" }}
+          >
+            {resolvedSchool?.logo_url ? (
+              <img
+                src={resolvedSchool.logo_url}
+                alt={`${resolvedSchool.name} logo`}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <GraduationCap className="w-10 h-10 text-white" />
+            )}
           </div>
 
           <h1 className="text-3xl font-bold text-white">
-            Smart-M Hub
+            {resolvedSchool?.name || "Smart-M Hub"}
           </h1>
 
           <p className="text-slate-400 mt-2">
-            {selectedRole
+            {resolvedSchool?.motto ||
+            (selectedRole
               ? `Logging in as ${
                   selectedRoleData?.label ||
                   "User"
                 }`
-              : "Select how you want to sign in"}
+              : "Select how you want to sign in")}
           </p>
 
         </div>
@@ -579,6 +637,27 @@ const selectedRoleData = roles.find(
               onSubmit={handleSubmit}
               className="space-y-5"
             >
+
+              {selectedRole !== "super_admin" && (
+                <div>
+                  <Label className="text-slate-300 mb-2 block">
+                    School Code
+                  </Label>
+                  <Input
+                    placeholder="SMH-KE-000021"
+                    value={formData.school_code}
+                    onChange={(e) =>
+                      updateField("school_code", e.target.value.toUpperCase())
+                    }
+                    required
+                  />
+                  {formData.school_code && !resolvedSchool && (
+                    <p className="text-xs text-amber-400 mt-2">
+                      Enter a valid active school code.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* EMAIL */}
               <div>

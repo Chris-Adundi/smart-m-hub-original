@@ -1,8 +1,10 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 import os
 import logging
@@ -171,6 +173,19 @@ def serialize_doc(doc: dict) -> dict:
 
 def serialize_docs(docs: list) -> list:
     return [serialize_doc(doc) for doc in docs]
+
+
+def api_success(data=None, message: Optional[str] = None, **extra) -> dict:
+    response = {
+        "success": True,
+        "data": data
+    }
+
+    if message:
+        response["message"] = message
+
+    response.update(extra)
+    return response
 
 
 def ensure_id(doc: dict) -> dict:
@@ -387,12 +402,87 @@ def generate_school_slug(name: str) -> str:
     return slug
 
 
-def generate_school_code() -> str:
-    return str(uuid.uuid4()).split("-")[0].upper()
+async def generate_school_code() -> str:
+    """
+    Allocate a human-readable school code from an atomic MongoDB counter.
+    The existence check keeps this compatible with schools created before
+    the counter was introduced.
+    """
+    while True:
+        counter = await db.counters.find_one_and_update(
+            {"_id": "school_code"},
+            {"$inc": {"sequence": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+        school_code = f"SMH-KE-{int(counter['sequence']):06d}"
+
+        if not await db.schools.find_one(
+            {"school_code": school_code},
+            {"_id": 1}
+        ):
+            return school_code
 
 
 def generate_invite_code() -> str:
     return str(uuid.uuid4()).split("-")[1].upper()
+
+
+def get_frontend_url() -> str:
+    return os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
+
+async def ensure_school_identity(school: dict) -> dict:
+    """Backfill identity fields for schools created by older versions."""
+    if not school:
+        return school
+
+    updates = {}
+    school_code = school.get("school_code")
+
+    if not school_code:
+        school_code = await generate_school_code()
+        updates["school_code"] = school_code
+
+    slug = school.get("slug") or school.get("school_slug")
+    if not slug:
+        slug = generate_school_slug(school.get("name") or "school")
+        updates["slug"] = slug
+
+    login_link = f"{get_frontend_url()}/login?school={school_code}"
+    if school.get("login_link") != login_link:
+        updates["login_link"] = login_link
+
+    if updates:
+        updates["updated_at"] = now_utc()
+        await db.schools.update_one(
+            {"_id": school["_id"]},
+            {"$set": updates}
+        )
+        school.update(updates)
+
+    return school
+
+
+def school_branding_payload(school: dict) -> dict:
+    theme = school.get("theme") or {}
+    return {
+        "id": school.get("id"),
+        "name": school.get("name"),
+        "school_code": school.get("school_code"),
+        "login_link": school.get("login_link"),
+        "operation_type": school.get("operation_type", "day"),
+        "boarding_enabled": bool(school.get("boarding_enabled", False)),
+        "logo_url": school.get("logo_url") or school.get("logo"),
+        "banner_url": school.get("banner_url"),
+        "motto": school.get("motto"),
+        "mission": school.get("mission"),
+        "vision": school.get("vision"),
+        "theme": {
+            "primary": theme.get("primary") or "#10B981",
+            "secondary": theme.get("secondary") or "#0F172A"
+        }
+    }
 
 
 # =====================================================
@@ -405,14 +495,25 @@ class RegisterSchoolRequest(BaseModel):
     phone: str
     email: EmailStr
     school_type: str
+    school_classification: Optional[str] = None
+    operation_type: str = "day"
 
     logo_url: Optional[str] = None
+    banner_url: Optional[str] = None
+    stamp_url: Optional[str] = None
     motto: Optional[str] = None
     vision: Optional[str] = None
     mission: Optional[str] = None
     principal_name: Optional[str] = None
+    principal_email: Optional[EmailStr] = None
+    principal_phone: Optional[str] = None
     website: Optional[str] = None
     established_year: Optional[str] = None
+    school_registration_number: Optional[str] = None
+    ministry_registration_number: Optional[str] = None
+    kra_pin: Optional[str] = None
+    theme_primary: Optional[str] = None
+    theme_secondary: Optional[str] = None
 
     admin_name: str
     admin_email: EmailStr
@@ -435,22 +536,23 @@ class LoginRequest(BaseModel):
 
     email: EmailStr
     password: str
+    school_code: Optional[str] = None
 
 
 class CreateStudentRequest(BaseModel):
 
     admission_number: str
     full_name: str
-    date_of_birth: str
+    date_of_birth: Optional[str] = None
 
-    gender: str
+    gender: Optional[str] = None
 
     class_name: Optional[str] = None
     year_of_study: Optional[str] = None
     stream: Optional[str] = None
 
-    guardian_name: str
-    guardian_phone: str
+    guardian_name: Optional[str] = None
+    guardian_phone: Optional[str] = None
 
     guardian_email: Optional[EmailStr] = None
     guardian_relationship: Optional[str] = None
@@ -537,7 +639,7 @@ class CreateAnnouncementRequest(BaseModel):
     title: str
     content: str
 
-    target_audience: str
+    target_audience: str = "all"
 
     target_class: Optional[str] = None
 
@@ -580,6 +682,20 @@ class ProgressStudentsRequest(BaseModel):
     from_class: Optional[str] = None
 
 
+class CreateStaffPayload(BaseModel):
+
+    full_name: str
+    email: EmailStr
+    phone: Optional[str] = None
+    employee_number: str
+    department: str
+    position: str
+    role: str = "teacher"
+    password: str
+    salary: Optional[float] = None
+    joined_date: Optional[str] = None
+
+
 # =========================
 # SCHOOL ADMIN DASHBOARD
 # =========================
@@ -596,27 +712,64 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
 
-    # Build invite link
+    school = await ensure_school_identity(school)
+
     invite_code = school.get("invite_code")
-    school_name_slug = school.get("name", "").lower().replace(" ", "-")
+    school_code = school.get("school_code")
 
-    invite_link = f"https://your-app.com/join/{school_name_slug}?code={invite_code}"
+    frontend_url = get_frontend_url()
+    invite_link = school.get("invite_link") or f"{frontend_url}/join/{school.get('join_slug') or invite_code}"
+    login_link = school.get("login_link") or f"{frontend_url}/login?school={school_code}"
 
-    school["_id"] = str(school.get("_id")) if school.get("_id") else None
+    students_count = await db.students.count_documents({"school_id": school_id})
+    teachers_count = await db.users.count_documents({"school_id": school_id, "role": "teacher"})
+    staff_count = await db.users.count_documents({
+        "school_id": school_id,
+        "role": {"$in": ["teacher", "finance", "secretary"]}
+    })
 
     return {
         "success": True,
         "data": {
             "id": school.get("id"),
             "name": school.get("name"),
+            "slug": school.get("slug"),
+            "school_code": school_code,
             "email": school.get("email"),
             "phone": school.get("phone"),
             "address": school.get("address"),
             "school_type": school.get("school_type"),
+            "school_classification": school.get("school_classification"),
+            "operation_type": school.get("operation_type", "day"),
+            "boarding_enabled": bool(school.get("boarding_enabled", False)),
             "invite_code": invite_code,
             "invite_link": invite_link,
-            "logo": school.get("logo"),
+            "login_link": login_link,
+            "logo": school.get("logo") or school.get("logo_url"),
+            "logo_url": school.get("logo_url"),
+            "banner_url": school.get("banner_url"),
+            "stamp_url": school.get("stamp_url"),
+            "motto": school.get("motto"),
+            "vision": school.get("vision"),
+            "mission": school.get("mission"),
+            "principal_name": school.get("principal_name"),
+            "principal_email": school.get("principal_email"),
+            "principal_phone": school.get("principal_phone"),
+            "website": school.get("website"),
+            "established_year": school.get("established_year"),
+            "school_registration_number": school.get("school_registration_number"),
+            "ministry_registration_number": school.get("ministry_registration_number"),
+            "kra_pin": school.get("kra_pin"),
+            "theme": school.get("theme") or {},
             "subscription_status": school.get("subscription_status"),
+            "subscription_expiry": school.get("subscription_expiry"),
+            "status": school.get("status"),
+            "date_registered": school.get("created_at"),
+            "counts": {
+                "students": students_count,
+                "teachers": teachers_count,
+                "staff": staff_count
+            }
         }
     }
 from fastapi import UploadFile, File
@@ -625,34 +778,95 @@ import base64
 
 @api_router.patch("/school/profile")
 async def update_school_profile(
-    name: str = None,
-    phone: str = None,
-    address: str = None,
-    logo: UploadFile = File(None),
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
+
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="School admin access required")
 
     school_id = current_user.get("school_id")
 
     if not school_id:
         raise HTTPException(status_code=403, detail="No school assigned")
 
-    update_data = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
 
-    if name:
-        update_data["name"] = name
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid profile payload")
 
-    if phone:
-        update_data["phone"] = phone
+    allowed_fields = {
+        "name",
+        "phone",
+        "address",
+        "email",
+        "school_type",
+        "school_classification",
+        "operation_type",
+        "logo_url",
+        "banner_url",
+        "stamp_url",
+        "motto",
+        "vision",
+        "mission",
+        "principal_name",
+        "principal_email",
+        "principal_phone",
+        "website",
+        "established_year",
+        "school_registration_number",
+        "ministry_registration_number",
+        "kra_pin"
+        ,
+        "theme_primary",
+        "theme_secondary"
+    }
 
-    if address:
-        update_data["address"] = address
+    update_data = {
+        key: value
+        for key, value in payload.items()
+        if key in allowed_fields and value is not None
+    }
 
-    # Handle logo upload (base64 simple storage)
-    if logo:
-        content = await logo.read()
-        encoded = base64.b64encode(content).decode("utf-8")
-        update_data["logo"] = f"data:image/png;base64,{encoded}"
+    if "operation_type" in update_data:
+        operation_type = str(update_data["operation_type"] or "day").lower().strip()
+
+        if operation_type not in ["day", "boarding", "mixed"]:
+            raise HTTPException(
+                status_code=400,
+                detail="operation_type must be day, boarding, or mixed"
+            )
+
+        update_data["operation_type"] = operation_type
+        update_data["boarding_enabled"] = operation_type in ["boarding", "mixed"]
+
+    current_school = await db.schools.find_one({"id": school_id})
+    if not current_school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    theme = dict(current_school.get("theme") or {})
+    primary = update_data.pop("theme_primary", None)
+    secondary = update_data.pop("theme_secondary", None)
+
+    color_pattern = re.compile(r"^#[0-9a-fA-F]{6}$")
+    for key, value in (("primary", primary), ("secondary", secondary)):
+        if value is not None:
+            value = str(value).strip()
+            if not color_pattern.fullmatch(value):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"theme_{key} must be a 6-digit hex color"
+                )
+            theme[key] = value
+
+    if primary is not None or secondary is not None:
+        update_data["theme"] = theme
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid profile fields provided")
 
     update_data["updated_at"] = datetime.now(timezone.utc)
 
@@ -661,9 +875,12 @@ async def update_school_profile(
         {"$set": update_data}
     )
 
+    updated_school = await db.schools.find_one({"id": school_id})
+
     return {
         "success": True,
-        "message": "School profile updated successfully"
+        "message": "School profile updated successfully",
+        "data": serialize_doc(updated_school)
     }
 # =========================
 # SCHOOL PROFILE / FINGERPRINT
@@ -1026,7 +1243,7 @@ async def get_staff(
     # BASE QUERY
     # =========================
     query = {
-        "role": "teacher"
+        "role": {"$in": ["teacher", "finance", "secretary"]}
     }
 
     # =========================
@@ -1062,6 +1279,98 @@ async def get_staff(
         "success": True,
         "data": serialize_docs(staff)
     }
+
+
+@api_router.post("/staff")
+async def create_staff(
+    payload: CreateStaffPayload,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+
+    if role not in ["school_admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    school_id = str(current_user.get("school_id") or "").strip()
+
+    if role != "super_admin" and not school_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No school assigned"
+        )
+
+    staff_role = normalize_role(payload.role)
+
+    if staff_role not in ["teacher", "finance", "secretary"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Staff role must be teacher, finance, or secretary"
+        )
+
+    email = payload.email.lower().strip()
+
+    existing = await db.users.find_one({
+        "email": email,
+        "school_id": school_id
+    })
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Staff email already exists")
+
+    employee_existing = await db.staff.find_one({
+        "school_id": school_id,
+        "employee_number": payload.employee_number
+    })
+
+    if employee_existing:
+        raise HTTPException(status_code=400, detail="Employee number already exists")
+
+    now = now_utc()
+    user_id = str(uuid.uuid4())
+    actor_id = current_user.get("user_id")
+
+    user_doc = {
+        "id": user_id,
+        "school_id": school_id,
+        "email": email,
+        "password_hash": hash_password(payload.password),
+        "full_name": payload.full_name,
+        "phone": payload.phone,
+        "role": staff_role,
+        "approval_status": "approved",
+        "is_active": True,
+        "is_suspended": False,
+        "created_at": now,
+        "updated_at": now
+    }
+
+    staff_doc = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "user_id": user_id,
+        "employee_number": payload.employee_number,
+        "department": payload.department,
+        "position": payload.position,
+        "salary": payload.salary,
+        "joined_date": payload.joined_date,
+        "created_by": actor_id,
+        "created_at": now,
+        "updated_at": now
+    }
+
+    await db.users.insert_one(user_doc)
+    await db.staff.insert_one(staff_doc)
+
+    return api_success(
+        {
+            "user": serialize_doc(user_doc),
+            "staff": serialize_doc(staff_doc)
+        },
+        message="Staff member created successfully"
+    )
 
 
 # =========================
@@ -1274,6 +1583,25 @@ async def approve_item(
     # =========================
     # COLLECTION MAP
     # =========================
+    item_type = (item_type or "").lower().strip()
+
+    item_type_aliases = {
+        "user": "users",
+        "student": "students",
+        "staff_member": "staff",
+        "result": "results",
+        "assessment": "results",
+        "assessment_report": "results",
+        "payment": "payments",
+        "receipt": "payments",
+        "announcement": "announcements",
+        "transaction": "finance_transactions",
+        "finance_transaction": "finance_transactions",
+        "inventory_item": "inventory"
+    }
+
+    item_type = item_type_aliases.get(item_type, item_type)
+
     collection_map = {
         "users": db.users,
         "students": db.students,
@@ -1282,7 +1610,8 @@ async def approve_item(
         "attendance": db.attendance,
         "payments": db.payments,
         "announcements": db.announcements,
-        "transactions": db.transactions,
+        "transactions": db.finance_transactions,
+        "finance_transactions": db.finance_transactions,
         "inventory": db.inventory
     }
 
@@ -1335,18 +1664,22 @@ async def approve_item(
             update_data["is_active"] = False
             update_data["is_suspended"] = True
 
+    if item_type == "payments" and action == "approved":
+        update_data["status"] = "completed"
+        update_data["completed_at"] = datetime.now(timezone.utc)
+
     # =========================
     # UPDATE DB
     # =========================
     await collection.update_one(
-        {"id": item_id},
+        query,
         {"$set": update_data}
     )
 
     # =========================
     # FETCH UPDATED ITEM
     # =========================
-    updated_item = await collection.find_one({"id": item_id})
+    updated_item = await collection.find_one(query)
 
     # =========================
     # RESPONSE
@@ -1366,6 +1699,29 @@ async def approve_item(
 # =========================
 # AUTH
 # =========================
+
+@api_router.get("/public/schools/resolve/{school_code}")
+async def resolve_school_code(school_code: str):
+    normalized_code = str(school_code or "").strip().upper()
+
+    if not re.fullmatch(r"SMH-KE-\d{6}", normalized_code):
+        raise HTTPException(status_code=400, detail="Invalid school code format")
+
+    school = await db.schools.find_one({
+        "school_code": normalized_code,
+        "is_active": {"$ne": False}
+    })
+
+    if not school:
+        raise HTTPException(status_code=404, detail="School code not found")
+
+    school = await ensure_school_identity(school)
+
+    return {
+        "success": True,
+        "data": school_branding_payload(school)
+    }
+
 
 @api_router.post("/auth/register-school")
 async def register_school(payload: RegisterSchoolRequest):
@@ -1415,7 +1771,13 @@ async def register_school(payload: RegisterSchoolRequest):
         admin_id = str(uuid.uuid4())
 
         school_slug = generate_school_slug(payload.name)
-        school_code = generate_school_code()
+        await db.schools.create_index(
+            "school_code",
+            unique=True,
+            sparse=True,
+            name="unique_school_code"
+        )
+        school_code = await generate_school_code()
         invite_code = generate_invite_code()
 
         initials = generate_initials(payload.name)
@@ -1424,10 +1786,18 @@ async def register_school(payload: RegisterSchoolRequest):
 
         join_slug = f"{clean_slug(payload.name)}-{invite_code}"
 
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = get_frontend_url()
         invite_link = f"{frontend_url}/join/{join_slug}"
+        login_link = f"{frontend_url}/login?school={school_code}"
 
         now = datetime.now(timezone.utc)
+
+        operation_type = str(payload.operation_type or "day").lower().strip()
+        if operation_type not in ["day", "boarding", "mixed"]:
+            raise HTTPException(
+                status_code=400,
+                detail="operation_type must be day, boarding, or mixed"
+            )
 
         # =========================
         # SCHOOL OBJECT (CLEANED)
@@ -1443,19 +1813,35 @@ async def register_school(payload: RegisterSchoolRequest):
             "fingerprint": fingerprint,
             "join_slug": join_slug,
             "invite_link": invite_link,
+            "login_link": login_link,
 
             "address": payload.address,
             "phone": payload.phone,
             "email": school_email,
             "school_type": payload.school_type,
+            "school_classification": payload.school_classification,
+            "operation_type": operation_type,
+            "boarding_enabled": operation_type in ["boarding", "mixed"],
 
             "logo_url": payload.logo_url,
+            "banner_url": payload.banner_url,
+            "stamp_url": payload.stamp_url,
             "motto": payload.motto,
             "vision": payload.vision,
             "mission": payload.mission,
             "principal_name": payload.principal_name,
+            "principal_email": payload.principal_email,
+            "principal_phone": payload.principal_phone,
             "website": payload.website,
             "established_year": payload.established_year,
+            "school_registration_number": payload.school_registration_number,
+            "ministry_registration_number": payload.ministry_registration_number,
+            "kra_pin": payload.kra_pin,
+            "theme": {
+                "primary": payload.theme_primary or "#10B981",
+                "secondary": payload.theme_secondary or "#0F172A"
+            },
+            "academic_structure": [],
 
             "status": "active",
             "is_active": True,
@@ -1467,7 +1853,13 @@ async def register_school(payload: RegisterSchoolRequest):
             "updated_at": now
         }
 
-        await db.schools.insert_one(school)
+        try:
+            await db.schools.insert_one(school)
+        except DuplicateKeyError:
+            raise HTTPException(
+                status_code=409,
+                detail="Generated school code already exists. Please retry."
+            )
 
         # =========================
         # ADMIN USER
@@ -1529,6 +1921,10 @@ async def register_school(payload: RegisterSchoolRequest):
             "fingerprint": fingerprint,
             "join_slug": join_slug,
             "invite_link": invite_link,
+            "login_link": login_link,
+            "operation_type": operation_type,
+            "boarding_enabled": operation_type in ["boarding", "mixed"],
+            "branding": school_branding_payload(school),
 
             "access_token": access_token,
             "token_type": "bearer",
@@ -1540,6 +1936,8 @@ async def register_school(payload: RegisterSchoolRequest):
                 "role": "school_admin",
                 "school_id": school_id,
                 "school_name": payload.name,
+                "school_code": school_code,
+                "school_branding": school_branding_payload(school),
                 "approval_status": "approved",
                 "is_active": True
             }
@@ -1716,13 +2114,33 @@ async def login(request: LoginRequest):
     try:
         email = (request.email or "").strip().lower()
         password = (request.password or "").strip()
+        school_code = (request.school_code or "").strip().upper()
 
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email and password required")
 
-        user = await db.users.find_one({"email": email})
+        user_query = {"email": email}
+        login_school = None
+
+        if school_code:
+            login_school = await db.schools.find_one({
+                "school_code": school_code,
+                "is_active": {"$ne": False}
+            })
+            if not login_school:
+                raise HTTPException(status_code=404, detail="School code not found")
+            user_query["school_id"] = str(login_school.get("id"))
+
+            print("\nLOGIN USER QUERY:")
+            print(user_query)
+
+        user = await db.users.find_one(user_query)
+
+        print("\nUSER FOUND:")
+        print(user)
 
         if not user:
+
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         user_id = user.get("id") or str(user.get("_id"))
@@ -1747,11 +2165,11 @@ async def login(request: LoginRequest):
 
         school_id = user.get("school_id")
 
-        school = None
+        school = login_school
         if school_id:
-            school = await db.schools.find_one({"id": school_id}) or await db.schools.find_one({"_id": school_id})
+            school = school or await db.schools.find_one({"id": school_id})
             if school:
-                school.pop("_id", None)
+                school = await ensure_school_identity(school)
 
         await db.users.update_one(
             {"id": user_id},
@@ -1776,11 +2194,13 @@ async def login(request: LoginRequest):
                 "role": db_role,
                 "school_id": school_id,
                 "school_name": school.get("name") if school else None,
+                "school_code": school.get("school_code") if school else None,
+                "school_branding": school_branding_payload(school) if school else None,
                 "approval_status": approval_status,
                 "is_active": user.get("is_active", True),
                 "is_suspended": user.get("is_suspended", False)
             },
-            "school": school
+            "school": serialize_doc(school) if school else None
         }
 
     except HTTPException:
@@ -1804,7 +2224,7 @@ async def get_school_invite(
 
     role = normalize_role(current_user.get("role", ""))
 
-    if role != "SCHOOL_ADMIN":
+    if role != "school_admin":
         raise HTTPException(
             status_code=403,
             detail="Forbidden"
@@ -2189,7 +2609,11 @@ async def create_student(
 
             "admission_number": request.admission_number,
             "full_name": request.full_name,
-            "date_of_birth": datetime.fromisoformat(request.date_of_birth),
+            "date_of_birth": (
+                datetime.fromisoformat(request.date_of_birth)
+                if request.date_of_birth
+                else None
+            ),
             "gender": request.gender,
 
             "class_name": request.class_name,
@@ -2838,20 +3262,35 @@ async def initiate_payment(
             detail="Internal server error"
         )
 @app.get("/api/payments")
-async def get_payments(current_user: dict = Depends(get_current_user)):
+async def get_payments(
+    approval_status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
     try:
         school_id = current_user.get("school_id")
 
         if not school_id:
             raise HTTPException(status_code=403, detail="No school assigned")
 
+        role = normalize_role(current_user.get("role"))
+
+        query = {
+            "school_id": school_id
+        }
+
+        if role not in ["school_admin", "finance", "super_admin"]:
+            query["approval_status"] = "approved"
+        elif approval_status and approval_status != "all":
+            query["approval_status"] = approval_status.lower()
+
         payments = await db.payments.find(
-            {"school_id": school_id}
-        ).to_list(1000)
+            query,
+            {"_id": 0}
+        ).sort("created_at", -1).to_list(1000)
 
         return {
             "success": True,
-            "data": payments
+            "data": serialize_docs(payments)
         }
 
     except Exception as e:
@@ -3087,6 +3526,85 @@ async def get_attendance(
 
 # ─── Exams ────────────────────────────────────────────────────────
 
+@api_router.get("/exams")
+async def get_exams(
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+
+    if role not in ["school_admin", "teacher", "student", "parent", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    exams = await db.exams.find(
+        {"school_id": school_id},
+        {"_id": 0}
+    ).sort("exam_date", -1).to_list(length=1000)
+
+    return api_success(serialize_docs(exams), count=len(exams))
+
+
+@api_router.post("/exams")
+async def create_exam(
+    request: CreateExamRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+
+    if role not in ["school_admin", "teacher", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    try:
+        exam_date = datetime.fromisoformat(request.exam_date)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid exam date")
+
+    existing = await db.exams.find_one({
+        "school_id": school_id,
+        "name": request.name,
+        "term": request.term,
+        "exam_number": request.exam_number,
+        "academic_year": request.academic_year,
+        "class_name": request.class_name,
+        "year_of_study": request.year_of_study
+    })
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Exam already exists")
+
+    exam = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "name": request.name,
+        "class_name": request.class_name,
+        "year_of_study": request.year_of_study,
+        "term": request.term,
+        "exam_number": request.exam_number,
+        "academic_year": request.academic_year,
+        "exam_date": exam_date,
+        "created_by": current_user.get("user_id"),
+        "created_at": now_utc(),
+        "updated_at": now_utc()
+    }
+
+    await db.exams.insert_one(exam)
+
+    return api_success(
+        serialize_doc(exam),
+        message="Exam created successfully",
+        exam_id=exam["id"]
+    )
+
+
 # OLD LOGIN - DISABLED
 # @api_router.post("/auth/login")
 async def login_legacy(request: LoginRequest):
@@ -3262,7 +3780,14 @@ async def record_result(
         # GRADE VALIDATION
         # =========================
         try:
-            grade = CBEGrade(request.grade.upper())
+            grade_value = str(request.grade or "").upper().strip()
+            grade_aliases = {
+                "EE": "EE1",
+                "ME": "ME1",
+                "AE": "AE1",
+                "BE": "BE1"
+            }
+            grade = CBEGrade(grade_aliases.get(grade_value, grade_value))
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid grade value")
 
@@ -3423,12 +3948,76 @@ async def get_announcements(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.post("/announcements")
+async def create_announcement(
+    request: CreateAnnouncementRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        school_id = current_user.get("school_id")
+
+        if not school_id:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+
+        role = normalize_role(current_user.get("role"))
+
+        if role not in ["school_admin", "secretary", "teacher", "finance", "super_admin"]:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+
+        auto_approve = role in ["school_admin", "super_admin"]
+        user_id = current_user.get("user_id")
+        now = now_utc()
+
+        announcement = {
+            "id": str(uuid.uuid4()),
+            "school_id": school_id,
+            "title": request.title,
+            "content": request.content,
+            "target_audience": request.target_audience,
+            "target_class": request.target_class,
+            "priority": request.priority or "normal",
+            "created_by": user_id,
+            "submitted_by": user_id,
+            "approval_status": "approved" if auto_approve else "pending",
+            "approved_by": user_id if auto_approve else None,
+            "approval_date": now if auto_approve else None,
+            "created_at": now,
+            "updated_at": now
+        }
+
+        await db.announcements.insert_one(announcement)
+
+        if announcement["approval_status"] == "pending":
+            await db.approvals.insert_one({
+                "id": str(uuid.uuid4()),
+                "type": "announcement",
+                "item_id": announcement["id"],
+                "school_id": school_id,
+                "status": "pending",
+                "submitted_by": user_id,
+                "created_at": now
+            })
+
+        return api_success(
+            serialize_doc(announcement),
+            message="Announcement submitted",
+            announcement_id=announcement["id"],
+            approval_status=announcement["approval_status"]
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"Create announcement error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 # =========================================================
 # ADMIN APPROVAL QUEUE (FIXED CONSISTENCY)
 # =========================================================
 
-@api_router.get("/admin/pending")
-async def get_all_pending(current_user: dict = Depends(get_current_user)):
+async def _legacy_get_all_pending(current_user: dict = Depends(get_current_user)):
 
     try:
 
@@ -3661,8 +4250,7 @@ async def get_approval_requests(
 
 # ─── Dashboard Stats ─────────────────────────────────────────────
 
-@api_router.put("/students/{student_id}")
-async def update_student(
+async def _legacy_update_student(
     student_id: str,
     update_data: dict,
     current_user: dict = Depends(get_current_user)

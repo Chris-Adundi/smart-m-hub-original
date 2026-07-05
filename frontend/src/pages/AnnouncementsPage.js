@@ -31,7 +31,12 @@ const AnnouncementsPage = () => {
   const fetchAnnouncements = async () => {
     try {
       const res = await apiClient.get("/announcements?approval_status=all");
-      setAnnouncements(res.data);
+      const data = res?.data;
+      setAnnouncements(
+        Array.isArray(data)
+          ? data
+          : data?.data || data?.announcements || []
+      );
     } catch (err) {
       toast.error("Failed to load announcements");
     } finally {
@@ -46,7 +51,7 @@ const AnnouncementsPage = () => {
       const res = await apiClient.post("/announcements", form);
 
       toast.success(
-        res.data.approval_status === "pending"
+        (res?.data?.approval_status || res?.data?.data?.approval_status) === "pending"
           ? "Sent for admin approval"
           : "Announcement published"
       );
