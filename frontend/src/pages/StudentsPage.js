@@ -86,6 +86,7 @@ const textFields = [
   ["guardian_national_id", "Guardian 1 National ID"],
   ["guardian_address", "Guardian 1 Physical Address"],
   ["secondary_guardian_name", "Guardian 2 Name"],
+  ["secondary_guardian_relationship", "Guardian 2 Relationship"],
   ["secondary_guardian_phone", "Guardian 2 Phone"],
   ["secondary_guardian_email", "Guardian 2 Email", "email"],
   ["secondary_guardian_occupation", "Guardian 2 Occupation"],
@@ -126,6 +127,15 @@ const StudentsPage = () => {
 
   const updateField = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateFileField = (field, file) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => updateField(field, reader.result);
+    reader.onerror = () => toast.error("Unable to read selected file");
+    reader.readAsDataURL(file);
   };
 
   const toggleDocument = (name, checked) => {
@@ -196,8 +206,11 @@ const StudentsPage = () => {
                   <Input value="Generated automatically if left blank" readOnly />
                 </div>
                 <div>
-                  <Label>Passport Photo URL</Label>
-                  <Input value={formData.passport_photo_url} onChange={(e) => updateField("passport_photo_url", e.target.value)} />
+                  <Label>Passport Photo</Label>
+                  <Input type="file" accept="image/*" onChange={(e) => updateFileField("passport_photo_url", e.target.files?.[0])} />
+                  {formData.passport_photo_url && (
+                    <img src={formData.passport_photo_url} alt="Passport preview" className="mt-2 h-20 w-20 rounded-lg object-cover border border-[#1E293B]" />
+                  )}
                 </div>
                 <div>
                   <Label>Gender</Label>
@@ -243,8 +256,11 @@ const StudentsPage = () => {
                   <Textarea value={formData.medication} onChange={(e) => updateField("medication", e.target.value)} />
                 </div>
                 <div>
-                  <Label>Hospital Letter URL</Label>
-                  <Input value={formData.hospital_letter_url} onChange={(e) => updateField("hospital_letter_url", e.target.value)} />
+                  <Label>Hospital Letter</Label>
+                  <Input type="file" accept="image/*,.pdf" onChange={(e) => updateFileField("hospital_letter_url", e.target.files?.[0])} />
+                  {formData.hospital_letter_url && (
+                    <p className="text-xs text-emerald-400 mt-2">Hospital letter attached</p>
+                  )}
                 </div>
               </section>
 
@@ -325,6 +341,23 @@ const StudentsPage = () => {
           </DialogHeader>
           {selectedStudent && (
             <Tabs defaultValue="overview">
+              <div className="flex items-center gap-4 mb-4">
+                {selectedStudent.passport_photo_url ? (
+                  <img
+                    src={selectedStudent.passport_photo_url}
+                    alt={`${selectedStudent.full_name} passport`}
+                    className="h-20 w-20 rounded-xl object-cover border border-[#1E293B]"
+                  />
+                ) : (
+                  <div className="h-20 w-20 rounded-xl border border-[#1E293B] bg-[#0F172A] flex items-center justify-center text-slate-500 text-xs">
+                    No photo
+                  </div>
+                )}
+                <div>
+                  <p className="text-white font-semibold">{selectedStudent.full_name}</p>
+                  <p className="text-slate-400 text-sm">{selectedStudent.admission_number}</p>
+                </div>
+              </div>
               <TabsList className="flex flex-wrap h-auto">
                 {["overview", "personal", "guardians", "academics", "attendance", "finance", "discipline", "medical", "communication", "history"].map((tab) => (
                   <TabsTrigger key={tab} value={tab}>{tab}</TabsTrigger>
