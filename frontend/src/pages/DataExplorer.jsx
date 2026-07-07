@@ -1,22 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { apiClient } from "@/App";
 
+const DATA_EXPLORER_ENDPOINTS = [
+  "schools",
+  "students",
+  "staff",
+  "payments",
+  "attendance",
+  "exams",
+  "results",
+  "announcements",
+  "finance/transactions",
+  "dashboard/stats",
+];
+
 export default function DataExplorer() {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
-
-  const endpoints = [
-    "schools",
-    "students",
-    "staff",
-    "payments",
-    "attendance",
-    "exams",
-    "results",
-    "announcements",
-    "finance/transactions",
-    "dashboard/stats",
-  ];
 
   useEffect(() => {
     let isMounted = true;
@@ -26,7 +26,7 @@ export default function DataExplorer() {
 
       try {
         await Promise.all(
-          endpoints.map(async (ep) => {
+          DATA_EXPLORER_ENDPOINTS.map(async (ep) => {
             try {
               const res = await apiClient.get(`/${ep}`);
               results[ep] = res?.data ?? {};
