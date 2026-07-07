@@ -543,6 +543,21 @@ const isStudent =
               </div>
             </div>
 
+            {schoolIdentity.generated_credentials?.username && (
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Admin Username</p>
+                <div className="flex gap-2">
+                  <Input value={schoolIdentity.generated_credentials.username || ""} readOnly />
+                  <Button
+                    variant="outline"
+                    onClick={() => copyIdentity(schoolIdentity.generated_credentials.username, "Admin username")}
+                  >
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-xs text-slate-400 mb-1">School Login Link</p>
               <div className="flex gap-2">
@@ -555,6 +570,21 @@ const isStudent =
                 </Button>
               </div>
             </div>
+
+            {schoolIdentity.generated_credentials?.temporary_password && (
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Temporary Password</p>
+                <div className="flex gap-2">
+                  <Input value={schoolIdentity.generated_credentials.temporary_password || ""} readOnly />
+                  <Button
+                    variant="outline"
+                    onClick={() => copyIdentity(schoolIdentity.generated_credentials.temporary_password, "Temporary password")}
+                  >
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

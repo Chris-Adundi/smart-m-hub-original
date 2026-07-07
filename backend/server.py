@@ -772,6 +772,16 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
         "school_id": school_id,
         "role": {"$in": ["teacher", "finance", "secretary"]}
     })
+    admin_user = None
+    if normalize_role(current_user.get("role")) == "school_admin":
+        admin_user = await db.users.find_one(
+            {
+                "school_id": school_id,
+                "role": "school_admin",
+                "id": current_user.get("user_id")
+            },
+            {"_id": 0, "username": 1, "temporary_password": 1, "email": 1}
+        )
 
     return {
         "success": True,
@@ -814,7 +824,12 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
                 "students": students_count,
                 "teachers": teachers_count,
                 "staff": staff_count
-            }
+            },
+            "generated_credentials": {
+                "username": (admin_user or {}).get("username") or school.get("name"),
+                "temporary_password": (admin_user or {}).get("temporary_password"),
+                "login_link": login_link
+            } if admin_user else None
         }
     }
 from fastapi import UploadFile, File

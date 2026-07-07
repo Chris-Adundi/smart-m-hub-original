@@ -27,7 +27,6 @@ import { toast } from "sonner";
 import {
   GraduationCap,
   AlertCircle,
-  Copy,
   CheckCircle,
 } from "lucide-react";
 
@@ -64,10 +63,7 @@ const RegisterPage = () => {
   });
 
   const [loading, setLoading] = useState(false);
-  const [schoolCode, setSchoolCode] = useState("");
-  const [loginLink, setLoginLink] = useState("");
-  const [temporaryPassword, setTemporaryPassword] = useState("");
-  const [username, setUsername] = useState("");
+  const [registrationSummary, setRegistrationSummary] = useState(null);
   const [registered, setRegistered] = useState(false);
 
   const updateField = (field, value) => {
@@ -75,15 +71,6 @@ const RegisterPage = () => {
       ...prev,
       [field]: value,
     }));
-  };
-
-  const copyToClipboard = async (text) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success("Copied successfully");
-    } catch {
-      toast.error("Failed to copy");
-    }
   };
 
   const handleSubmit = async (e) => {
@@ -125,10 +112,13 @@ const RegisterPage = () => {
 
       const data = response?.data || {};
 
-      setSchoolCode(data.school_code || "");
-      setLoginLink(data.generated_credentials?.login_link || data.login_link || "");
-      setTemporaryPassword(data.generated_credentials?.temporary_password || "");
-      setUsername(data.generated_credentials?.username || formData.name);
+      setRegistrationSummary({
+        schoolName: data.school_name || formData.name,
+        invoiceNumber: data.installation_invoice?.invoice_number || "",
+        installationFee: data.installation_invoice?.amount || 5000,
+        approvalStatus: data.approval_status || "pending",
+        paymentStatus: data.payment_status || "pending",
+      });
       setRegistered(true);
 
       toast.success("School registered. Installation payment and approval are required before login.");
@@ -173,55 +163,29 @@ const RegisterPage = () => {
                   School Registered Successfully - Pending Approval
                 </div>
 
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    School Code
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
+                    <div className="text-slate-300">School</div>
+                    <div className="text-white font-medium">{registrationSummary?.schoolName}</div>
                   </div>
-                  <div className="flex gap-2">
-                    <Input value={schoolCode} readOnly className="bg-slate-900 text-white" />
-                    <Button type="button" onClick={() => copyToClipboard(schoolCode)}>
-                      <Copy className="w-4 h-4" />
-                    </Button>
+                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
+                    <div className="text-slate-300">Installation Invoice</div>
+                    <div className="text-white font-medium">{registrationSummary?.invoiceNumber || "Generated"}</div>
                   </div>
-                </div>
-
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    Username
+                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
+                    <div className="text-slate-300">Installation Fee</div>
+                    <div className="text-white font-medium">KES {Number(registrationSummary?.installationFee || 5000).toLocaleString()}</div>
                   </div>
-                  <div className="flex gap-2">
-                    <Input value={username} readOnly className="bg-slate-900 text-white" />
-                    <Button type="button" onClick={() => copyToClipboard(username)}>
-                      <Copy className="w-4 h-4" />
-                    </Button>
+                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
+                    <div className="text-slate-300">Current Status</div>
+                    <div className="text-white font-medium capitalize">
+                      Payment {registrationSummary?.paymentStatus} | Approval {registrationSummary?.approvalStatus}
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    Temporary Password
-                  </div>
-                  <div className="flex gap-2">
-                    <Input value={temporaryPassword} readOnly className="bg-slate-900 text-white" />
-                    <Button type="button" onClick={() => copyToClipboard(temporaryPassword)}>
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    School Login Link
-                  </div>
-                  <div className="flex gap-2">
-                    <Input value={loginLink} readOnly className="bg-slate-900 text-white" />
-                    <Button type="button" onClick={() => copyToClipboard(loginLink)}>
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <div className="text-sm mt-2 text-slate-300">
-                    Access remains disabled until installation payment and super admin approval.
-                  </div>
+                <div className="text-sm mt-2 text-slate-300">
+                  School code, login link, username and temporary password will be available inside the School Admin Dashboard after payment and platform approval.
                 </div>
 
                 <Button
