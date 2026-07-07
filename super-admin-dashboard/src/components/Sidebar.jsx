@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
 
 const linkStyle = ({ isActive }) => ({
-  display: "block",
-  padding: "10px 12px",
+  display: "flex",
+  alignItems: "center",
+  padding: "11px 12px",
   color: isActive ? "#ffffff" : "#cbd5e1",
-  background: isActive ? "#2563eb" : "transparent",
+  background: isActive ? "#1d4ed8" : "transparent",
   textDecoration: "none",
   borderRadius: "8px",
   marginBottom: "8px",
@@ -19,9 +20,10 @@ export default function Sidebar() {
       style={{
         width: "240px",
         minHeight: "100vh",
-        background: "#0f172a",
+        background: "#0b1220",
         padding: "16px",
         boxSizing: "border-box",
+        borderRight: "1px solid #1f2a3d",
       }}
     >
       <div
@@ -32,7 +34,7 @@ export default function Sidebar() {
           marginBottom: "20px",
         }}
       >
-        Super Admin
+        SMART M HUB
       </div>
 
       <nav>
@@ -62,6 +64,10 @@ export default function Sidebar() {
 
         <NavLink to="/approvals" style={linkStyle}>
           Approvals
+        </NavLink>
+
+        <NavLink to="/control" style={linkStyle}>
+          Platform Control
         </NavLink>
       </nav>
     </div>

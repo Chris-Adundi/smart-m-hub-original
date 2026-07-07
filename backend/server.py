@@ -10,6 +10,8 @@ import os
 import logging
 import uuid
 import re
+import secrets
+import string
 
 from pathlib import Path
 from pydantic import BaseModel, EmailStr
@@ -428,6 +430,21 @@ def generate_invite_code() -> str:
     return str(uuid.uuid4()).split("-")[1].upper()
 
 
+def generate_temporary_password(length: int = 12) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+async def generate_admission_number(school_id: str) -> str:
+    counter = await db.counters.find_one_and_update(
+        {"_id": f"admission_number:{school_id}"},
+        {"$inc": {"sequence": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
+    return f"ADM-{int(counter['sequence']):05d}"
+
+
 def get_frontend_url() -> str:
     return os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
@@ -518,7 +535,18 @@ class RegisterSchoolRequest(BaseModel):
     admin_name: str
     admin_email: EmailStr
     admin_phone: Optional[str] = None
-    admin_password: str
+    admin_password: Optional[str] = None
+    curriculum: Optional[str] = "CBC"
+    ownership: Optional[str] = None
+    alternative_phone: Optional[str] = None
+    country: Optional[str] = None
+    county: Optional[str] = None
+    sub_county: Optional[str] = None
+    town: Optional[str] = None
+    postal_address: Optional[str] = None
+    admin_national_id: Optional[str] = None
+    admin_role: Optional[str] = "School Administrator"
+    declarations_confirmed: Optional[bool] = False
 
 
 class JoinSchoolRequest(BaseModel):
@@ -541,11 +569,16 @@ class LoginRequest(BaseModel):
 
 class CreateStudentRequest(BaseModel):
 
-    admission_number: str
+    admission_number: Optional[str] = None
+    passport_photo_url: Optional[str] = None
     full_name: str
     date_of_birth: Optional[str] = None
 
     gender: Optional[str] = None
+    birth_certificate_no: Optional[str] = None
+    nationality: Optional[str] = None
+    religion: Optional[str] = None
+    special_needs: Optional[str] = None
 
     class_name: Optional[str] = None
     year_of_study: Optional[str] = None
@@ -556,11 +589,17 @@ class CreateStudentRequest(BaseModel):
 
     guardian_email: Optional[EmailStr] = None
     guardian_relationship: Optional[str] = None
+    guardian_occupation: Optional[str] = None
+    guardian_national_id: Optional[str] = None
+    guardian_address: Optional[str] = None
 
     secondary_guardian_name: Optional[str] = None
     secondary_guardian_phone: Optional[str] = None
     secondary_guardian_email: Optional[EmailStr] = None
     secondary_guardian_relationship: Optional[str] = None
+    secondary_guardian_occupation: Optional[str] = None
+    secondary_guardian_national_id: Optional[str] = None
+    secondary_guardian_address: Optional[str] = None
 
     blood_type: Optional[str] = None
     allergies: Optional[str] = None
@@ -568,6 +607,12 @@ class CreateStudentRequest(BaseModel):
     disabilities: Optional[str] = None
     immunization_status: Optional[str] = None
     medical_info: Optional[str] = None
+    medication: Optional[str] = None
+    hospital_letter_url: Optional[str] = None
+    previous_school: Optional[str] = None
+    transfer_reason: Optional[str] = None
+    last_class: Optional[str] = None
+    documents_attached: Optional[List[str]] = None
 
     status: Optional[str] = "active"
 
@@ -1799,6 +1844,9 @@ async def register_school(payload: RegisterSchoolRequest):
                 detail="operation_type must be day, boarding, or mixed"
             )
 
+        temporary_password = payload.admin_password or generate_temporary_password()
+        billing_day = now.day
+
         # =========================
         # SCHOOL OBJECT (CLEANED)
         # =========================
@@ -1820,8 +1868,16 @@ async def register_school(payload: RegisterSchoolRequest):
             "email": school_email,
             "school_type": payload.school_type,
             "school_classification": payload.school_classification,
+            "curriculum": payload.curriculum or "CBC",
+            "ownership": payload.ownership,
             "operation_type": operation_type,
             "boarding_enabled": operation_type in ["boarding", "mixed"],
+            "alternative_phone": payload.alternative_phone,
+            "country": payload.country,
+            "county": payload.county,
+            "sub_county": payload.sub_county,
+            "town": payload.town,
+            "postal_address": payload.postal_address,
 
             "logo_url": payload.logo_url,
             "banner_url": payload.banner_url,
@@ -1843,9 +1899,15 @@ async def register_school(payload: RegisterSchoolRequest):
             },
             "academic_structure": [],
 
-            "status": "active",
-            "is_active": True,
-            "approval_status": "approved",
+            "status": "pending_approval",
+            "is_active": False,
+            "approval_status": "pending",
+            "subscription_plan": "standard",
+            "subscription_status": "inactive",
+            "subscription_amount": 2000,
+            "billing_day": billing_day,
+            "installation_fee": 5000,
+            "payment_status": "pending",
 
             "blocked_users": [],
 
@@ -1870,7 +1932,7 @@ async def register_school(payload: RegisterSchoolRequest):
             "email": admin_email,
             "phone": payload.admin_phone,
 
-            "password_hash": hash_password(payload.admin_password),
+            "password_hash": hash_password(temporary_password),
 
             # ROLE SYSTEM (CRITICAL)
             "role": "school_admin",
@@ -1881,9 +1943,13 @@ async def register_school(payload: RegisterSchoolRequest):
             "school_fingerprint": fingerprint,
 
             # APPROVAL
-            "approval_status": "approved",
-            "is_active": True,
+            "approval_status": "pending",
+            "is_active": False,
             "is_suspended": False,
+            "temporary_password": temporary_password,
+            "username": payload.name,
+            "national_id": payload.admin_national_id,
+            "admin_role": payload.admin_role or "School Administrator",
 
             "last_login": None,
 
@@ -1892,6 +1958,21 @@ async def register_school(payload: RegisterSchoolRequest):
         }
 
         await db.users.insert_one(admin)
+
+        invoice = {
+            "id": str(uuid.uuid4()),
+            "school_id": school_id,
+            "school_name": payload.name,
+            "invoice_type": "installation",
+            "invoice_number": f"INV-{school_code}-{now.strftime('%Y%m%d')}",
+            "amount": 5000,
+            "currency": "KES",
+            "status": "pending",
+            "description": "SMART M HUB installation fee",
+            "created_at": now,
+            "updated_at": now
+        }
+        await db.platform_invoices.insert_one(invoice)
 
         # =========================
         # TOKEN (FIXED STRUCTURE)
@@ -1909,7 +1990,7 @@ async def register_school(payload: RegisterSchoolRequest):
         # =========================
         return {
             "success": True,
-            "message": "School registered successfully",
+            "message": "School registered successfully. Installation payment and super admin approval are required before login.",
 
             "school_id": school_id,
             "school_name": payload.name,
@@ -1926,8 +2007,14 @@ async def register_school(payload: RegisterSchoolRequest):
             "boarding_enabled": operation_type in ["boarding", "mixed"],
             "branding": school_branding_payload(school),
 
-            "access_token": access_token,
-            "token_type": "bearer",
+            "approval_status": "pending",
+            "payment_status": "pending",
+            "installation_invoice": serialize_doc(invoice),
+            "generated_credentials": {
+                "username": payload.name,
+                "temporary_password": temporary_password,
+                "login_link": login_link
+            },
 
             "user": {
                 "id": admin_id,
@@ -1938,8 +2025,8 @@ async def register_school(payload: RegisterSchoolRequest):
                 "school_name": payload.name,
                 "school_code": school_code,
                 "school_branding": school_branding_payload(school),
-                "approval_status": "approved",
-                "is_active": True
+                "approval_status": "pending",
+                "is_active": False
             }
         }
 
@@ -2124,20 +2211,13 @@ async def login(request: LoginRequest):
 
         if school_code:
             login_school = await db.schools.find_one({
-                "school_code": school_code,
-                "is_active": {"$ne": False}
+                "school_code": school_code
             })
             if not login_school:
                 raise HTTPException(status_code=404, detail="School code not found")
             user_query["school_id"] = str(login_school.get("id"))
 
-            print("\nLOGIN USER QUERY:")
-            print(user_query)
-
         user = await db.users.find_one(user_query)
-
-        print("\nUSER FOUND:")
-        print(user)
 
         if not user:
 
@@ -2160,7 +2240,7 @@ async def login(request: LoginRequest):
 
         approval_status = (user.get("approval_status") or "pending").lower()
 
-        if db_role != "school_admin" and approval_status != "approved":
+        if approval_status != "approved":
             raise HTTPException(status_code=403, detail="Account not approved")
 
         school_id = user.get("school_id")
@@ -2170,6 +2250,18 @@ async def login(request: LoginRequest):
             school = school or await db.schools.find_one({"id": school_id})
             if school:
                 school = await ensure_school_identity(school)
+                school_approval = str(school.get("approval_status") or "pending").lower()
+                school_subscription = str(school.get("subscription_status") or "inactive").lower()
+                school_status = str(school.get("status") or "").lower()
+
+                if school_approval != "approved":
+                    raise HTTPException(status_code=403, detail="School is pending platform approval")
+
+                if school.get("is_active") is False or school_status in {"suspended", "inactive", "pending_approval"}:
+                    raise HTTPException(status_code=403, detail="School access is disabled")
+
+                if school_subscription in {"expired", "suspended", "inactive"}:
+                    raise HTTPException(status_code=403, detail="School subscription is not active")
 
         await db.users.update_one(
             {"id": user_id},
@@ -2587,9 +2679,11 @@ async def create_student(
         # =========================
         # DUPLICATE CHECK
         # =========================
+        admission_number = request.admission_number or await generate_admission_number(school_id)
+
         existing_student = await db.students.find_one({
             "school_id": school_id,
-            "admission_number": request.admission_number
+            "admission_number": admission_number
         })
 
         if existing_student:
@@ -2607,7 +2701,9 @@ async def create_student(
             "id": str(uuid.uuid4()),
             "school_id": school_id,
 
-            "admission_number": request.admission_number,
+            "admission_number": admission_number,
+            "student_id": f"STU-{admission_number}",
+            "passport_photo_url": request.passport_photo_url,
             "full_name": request.full_name,
             "date_of_birth": (
                 datetime.fromisoformat(request.date_of_birth)
@@ -2615,6 +2711,10 @@ async def create_student(
                 else None
             ),
             "gender": request.gender,
+            "birth_certificate_no": request.birth_certificate_no,
+            "nationality": request.nationality,
+            "religion": request.religion,
+            "special_needs": request.special_needs,
 
             "class_name": request.class_name,
             "year_of_study": request.year_of_study,
@@ -2624,11 +2724,17 @@ async def create_student(
             "guardian_phone": request.guardian_phone,
             "guardian_email": request.guardian_email,
             "guardian_relationship": request.guardian_relationship,
+            "guardian_occupation": request.guardian_occupation,
+            "guardian_national_id": request.guardian_national_id,
+            "guardian_address": request.guardian_address,
 
             "secondary_guardian_name": request.secondary_guardian_name,
             "secondary_guardian_phone": request.secondary_guardian_phone,
             "secondary_guardian_email": request.secondary_guardian_email,
             "secondary_guardian_relationship": request.secondary_guardian_relationship,
+            "secondary_guardian_occupation": request.secondary_guardian_occupation,
+            "secondary_guardian_national_id": request.secondary_guardian_national_id,
+            "secondary_guardian_address": request.secondary_guardian_address,
 
             "blood_type": request.blood_type,
             "allergies": request.allergies,
@@ -2636,6 +2742,12 @@ async def create_student(
             "disabilities": request.disabilities,
             "immunization_status": request.immunization_status,
             "medical_info": request.medical_info,
+            "medication": request.medication,
+            "hospital_letter_url": request.hospital_letter_url,
+            "previous_school": request.previous_school,
+            "transfer_reason": request.transfer_reason,
+            "last_class": request.last_class,
+            "documents_attached": request.documents_attached or [],
 
             "status": "active",
 
@@ -2676,6 +2788,7 @@ async def create_student(
             "success": True,
             "message": "Student created successfully",
             "student_id": student_data["id"],
+            "admission_number": admission_number,
             "approval_status": student_data["approval_status"]
         }
 
@@ -3182,6 +3295,7 @@ async def initiate_payment(
             "school_id": school_id,
 
             "student_id": request.student_id,
+            "receipt_number": f"RCP-{now.strftime('%Y%m%d')}-{payment_id[:8].upper()}",
             "amount": request.amount,
             "payment_type": request.payment_type,
             "payment_method": method,
@@ -3194,7 +3308,7 @@ async def initiate_payment(
             # =========================
             # PAYMENT STATE
             # =========================
-            "status": "pending",
+            "status": "completed" if auto_approve else "pending",
 
             # =========================
             # APPROVAL STATE
@@ -3247,6 +3361,7 @@ async def initiate_payment(
         return {
             "success": True,
             "payment_id": payment_id,
+            "receipt_number": payment["receipt_number"],
             "message": "Payment recorded successfully",
             "status": payment["status"],
             "approval_status": payment["approval_status"]
@@ -4439,7 +4554,11 @@ async def mpesa_callback(request: Request):
 # ─────────────────────────────────────────────
 
 @api_router.get("/portal/my-data")
-async def get_my_portal_data(current_user: dict = Depends(get_current_user)):
+async def get_my_portal_data(
+    selected_student_id: Optional[str] = None,
+    admission_number: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
     try:
 
         school_id = current_user.get("school_id")
@@ -4450,30 +4569,51 @@ async def get_my_portal_data(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="No school assigned")
 
         # =========================
-        # STUDENT LINKING (SAFE + CONSISTENT)
+        # STUDENT LINKING (APPROVED ONLY)
+        # Parent accounts can manage multiple children, but every child
+        # remains a separate record and query scope.
         # =========================
-        student = await db.students.find_one(
-            {
-                "school_id": school_id,
-                "submitted_by": user_id,
-                "approval_status": "approved"
-            },
-            {"_id": 0}
-        )
+        child_query = {
+            "school_id": school_id,
+            "approval_status": "approved",
+            "$or": [
+                {"submitted_by": user_id}
+            ]
+        }
 
-        if not student and email:
-            student = await db.students.find_one(
-                {
-                    "school_id": school_id,
-                    "guardian_email": email,
-                    "approval_status": "approved"
-                },
-                {"_id": 0}
+        if email:
+            child_query["$or"].extend([
+                {"guardian_email": email},
+                {"secondary_guardian_email": email}
+            ])
+
+        children = await db.students.find(
+            child_query,
+            {"_id": 0}
+        ).sort("full_name", 1).to_list(100)
+
+        if admission_number:
+            admission_number = admission_number.strip()
+            children = [
+                child for child in children
+                if str(child.get("admission_number") or "").lower() == admission_number.lower()
+            ]
+
+        student = None
+
+        if selected_student_id:
+            student = next(
+                (child for child in children if child.get("id") == selected_student_id),
+                None
             )
+
+        if not student and children:
+            student = children[0]
 
         if not student:
             return {
                 "student": None,
+                "children": [],
                 "results": [],
                 "attendance": [],
                 "payments": [],
@@ -4549,6 +4689,19 @@ async def get_my_portal_data(current_user: dict = Depends(get_current_user)):
             {"_id": 0}
         ).sort("created_at", -1).to_list(500)
 
+        school = await db.schools.find_one(
+            {"id": school_id},
+            {"_id": 0}
+        )
+
+        for payment in payments:
+            payment["school_name"] = school.get("name") if school else None
+            payment["school_code"] = school.get("school_code") if school else None
+            payment["school_logo"] = (school.get("logo_url") or school.get("logo")) if school else None
+            payment["student_name"] = student.get("full_name")
+            payment["admission_number"] = student.get("admission_number")
+            payment["received_from"] = student.get("guardian_name") or student.get("secondary_guardian_name")
+
         total_paid = sum(
             float(p.get("amount") or 0)
             for p in payments
@@ -4581,12 +4734,22 @@ async def get_my_portal_data(current_user: dict = Depends(get_current_user)):
             {"_id": 0}
         ).sort("created_at", -1).to_list(100)
 
+        visible_announcements = []
+        for announcement in announcements:
+            audience = str(announcement.get("target_audience") or "all").lower()
+            target_class = announcement.get("target_class")
+            if audience in ["all", "students", "parents"]:
+                visible_announcements.append(announcement)
+            elif target_class and target_class == student.get("class_name"):
+                visible_announcements.append(announcement)
+
         return {
             "student": student,
+            "children": children,
             "results": results,
             "attendance": attendance_records,
             "payments": payments,
-            "announcements": announcements,
+            "announcements": visible_announcements,
             "fee_balance": fee_balance
         }
 

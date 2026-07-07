@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logout } from "../auth/superAdminAuth";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
@@ -38,6 +39,13 @@ api.interceptors.response.use(
       error?.message ||
       "An unexpected error occurred";
 
+    if ([401, 403].includes(error?.response?.status)) {
+      logout();
+      if (window.location.pathname !== "/login") {
+        window.location.replace("/login");
+      }
+    }
+
     return Promise.reject(new Error(message));
   }
 );
@@ -69,6 +77,41 @@ export async function toggleSchool(id) {
   const { data } = await api.patch(
     `/schools/${encodeURIComponent(id)}/toggle`
   );
+  return data;
+}
+
+export async function approveSchool(id) {
+  const { data } = await api.patch(`/schools/${encodeURIComponent(id)}/approve`);
+  return data;
+}
+
+export async function suspendSchool(id) {
+  const { data } = await api.patch(`/schools/${encodeURIComponent(id)}/suspend`);
+  return data;
+}
+
+export async function activateSchool(id) {
+  const { data } = await api.patch(`/schools/${encodeURIComponent(id)}/activate`);
+  return data;
+}
+
+export async function resetSchoolPassword(id, password) {
+  const { data } = await api.post(`/schools/${encodeURIComponent(id)}/reset-password`, { password });
+  return data;
+}
+
+export async function getSchoolUsers(id) {
+  const { data } = await api.get(`/schools/${encodeURIComponent(id)}/users`);
+  return data;
+}
+
+export async function getAnalytics() {
+  const { data } = await api.get("/analytics");
+  return data;
+}
+
+export async function getPlatformControl() {
+  const { data } = await api.get("/platform-control");
   return data;
 }
 

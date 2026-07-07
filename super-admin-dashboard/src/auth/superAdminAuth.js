@@ -1,14 +1,26 @@
 export function getAuthToken() {
-return localStorage.getItem("access_token");
+return (
+localStorage.getItem("smart_m_hub_token") ||
+localStorage.getItem("access_token")
+);
 }
 
 export function getCurrentUser() {
 try {
-const user = localStorage.getItem("current_user");
+const user =
+localStorage.getItem("smart_m_hub_user") ||
+localStorage.getItem("current_user");
 return user ? JSON.parse(user) : null;
 } catch {
 return null;
 }
+}
+
+export function saveSession(token, user) {
+localStorage.setItem("smart_m_hub_token", token);
+localStorage.setItem("access_token", token);
+localStorage.setItem("smart_m_hub_user", JSON.stringify(user));
+localStorage.setItem("current_user", JSON.stringify(user));
 }
 
 export function isAuthenticated() {
@@ -51,6 +63,8 @@ return roles.map((r) => r.toLowerCase()).includes(role);
 }
 
 export function logout() {
+localStorage.removeItem("smart_m_hub_token");
+localStorage.removeItem("smart_m_hub_user");
 localStorage.removeItem("access_token");
 localStorage.removeItem("refresh_token");
 localStorage.removeItem("current_user");

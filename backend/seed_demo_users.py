@@ -1,16 +1,59 @@
+from datetime import datetime, timezone
 from pymongo import MongoClient
 from auth import hash_password
+
 
 client = MongoClient("mongodb://localhost:27017")
 db = client["test_database"]
 
+now = datetime.now(timezone.utc)
+demo_school_id = "demo-school"
+demo_school_code = "SMH-KE-000001"
+existing_demo_school = db.schools.find_one({"school_code": demo_school_code})
+if existing_demo_school:
+    demo_school_id = existing_demo_school.get("id") or demo_school_id
+
+db.schools.update_one(
+    {"$or": [{"id": demo_school_id}, {"school_code": demo_school_code}]},
+    {
+        "$set": {
+            "id": demo_school_id,
+            "name": "Demo School",
+            "slug": "demo-school",
+            "school_code": demo_school_code,
+            "login_link": f"http://localhost:3000/login?school={demo_school_code}",
+            "invite_code": "DEMO2026",
+            "invite_link": "http://localhost:3000/join/demo-school-DEMO2026",
+            "address": "Demo Campus",
+            "phone": "+254700000000",
+            "email": "admin@demo.com",
+            "school_type": "primary",
+            "school_classification": "private",
+            "operation_type": "day",
+            "boarding_enabled": False,
+            "status": "active",
+            "is_active": True,
+            "approval_status": "approved",
+            "subscription_status": "active",
+            "subscription_plan": "standard",
+            "subscription_amount": 2000,
+            "payment_status": "paid",
+            "billing_day": now.day,
+            "theme": {"primary": "#10B981", "secondary": "#0F172A"},
+            "approved_at": now,
+            "updated_at": now,
+        },
+        "$setOnInsert": {"created_at": now},
+    },
+    upsert=True,
+)
+
 users = [
-    {"email": "admin@demo.com", "password": "admin123", "role": "school_admin"},
-    {"email": "secretary@demo.com", "password": "secretary123", "role": "secretary"},
-    {"email": "finance@demo.com", "password": "finance123", "role": "finance"},
-    {"email": "teacher@demo.com", "password": "teacher123", "role": "teacher"},
-    {"email": "student@demo.com", "password": "student123", "role": "student"},
-    {"email": "developer@system.com", "password": "dev123", "role": "super_admin"},
+    {"email": "admin@demo.com", "password": "admin123", "role": "school_admin", "full_name": "Demo School Admin", "school_id": demo_school_id},
+    {"email": "secretary@demo.com", "password": "secretary123", "role": "secretary", "full_name": "Demo Secretary", "school_id": demo_school_id},
+    {"email": "finance@demo.com", "password": "finance123", "role": "finance", "full_name": "Demo Finance Officer", "school_id": demo_school_id},
+    {"email": "teacher@demo.com", "password": "teacher123", "role": "teacher", "full_name": "Demo Teacher", "school_id": demo_school_id},
+    {"email": "student@demo.com", "password": "student123", "role": "student", "full_name": "Demo Student", "school_id": demo_school_id},
 ]
 
 for u in users:
@@ -19,14 +62,57 @@ for u in users:
         {
             "$set": {
                 "email": u["email"],
+                "full_name": u["full_name"],
                 "password_hash": hash_password(u["password"]),
                 "role": u["role"],
+                "school_id": u["school_id"],
+                "school_name": "Demo School",
                 "approval_status": "approved",
                 "is_active": True,
-                "is_suspended": False
-            }
+                "is_suspended": False,
+                "updated_at": now,
+            },
+            "$setOnInsert": {"id": f"demo-{u['role']}", "created_at": now},
         },
-        upsert=True
+        upsert=True,
     )
 
-print("DONE: demo users seeded")
+db.users.update_one(
+    {"email": "developer@system.com"},
+    {
+        "$set": {
+            "email": "developer@system.com",
+            "full_name": "Platform Owner",
+            "password_hash": hash_password("dev123"),
+            "role": "super_admin",
+            "approval_status": "approved",
+            "is_active": True,
+            "is_suspended": False,
+            "updated_at": now,
+        },
+        "$unset": {"school_id": "", "school_name": ""},
+        "$setOnInsert": {"id": "platform-owner", "created_at": now},
+    },
+    upsert=True,
+)
+
+db.platform_invoices.update_one(
+    {"school_id": demo_school_id, "invoice_type": "installation"},
+    {
+        "$set": {
+            "school_id": demo_school_id,
+            "school_name": "Demo School",
+            "invoice_type": "installation",
+            "invoice_number": f"INV-{demo_school_code}-DEMO",
+            "amount": 5000,
+            "currency": "KES",
+            "status": "paid",
+            "paid_at": now,
+            "updated_at": now,
+        },
+        "$setOnInsert": {"id": "demo-installation-invoice", "created_at": now},
+    },
+    upsert=True,
+)
+
+print("DONE: demo school approved and demo users activated")

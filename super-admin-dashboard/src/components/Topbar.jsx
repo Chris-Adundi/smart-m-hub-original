@@ -1,34 +1,56 @@
+import { useNavigate } from "react-router-dom";
+import { getCurrentUser, logout } from "../auth/superAdminAuth";
+
 export default function Topbar() {
+  const navigate = useNavigate();
+  const user = getCurrentUser();
+
+  const signOut = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
+
   return (
-    <div
-      style={{
-        height: "60px",
-        borderBottom: "1px solid #e5e7eb",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 20px",
-        background: "#ffffff",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "16px",
-          fontWeight: 600,
-          color: "#111827",
-        }}
-      >
-        Platform Control Center
+    <div style={barStyle}>
+      <div>
+        <div style={titleStyle}>Platform Control Center</div>
+        <div style={mutedStyle}>Owner-only Smart M Hub operations</div>
       </div>
 
-      <span
-        style={{
-          fontSize: "14px",
-          color: "#6b7280",
-        }}
-      >
-        Admin
-      </span>
+      <div style={rightStyle}>
+        <span style={pillStyle}>{user?.email || "Super Admin"}</span>
+        <button style={buttonStyle} onClick={signOut}>Logout</button>
+      </div>
     </div>
   );
 }
+
+const barStyle = {
+  minHeight: 64,
+  borderBottom: "1px solid #1f2a3d",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 16,
+  padding: "0 20px",
+  background: "#0b1220",
+};
+const titleStyle = { fontSize: 16, fontWeight: 700, color: "#f8fafc" };
+const mutedStyle = { marginTop: 3, fontSize: 12, color: "#94a3b8" };
+const rightStyle = { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" };
+const pillStyle = {
+  color: "#cbd5e1",
+  background: "#101827",
+  border: "1px solid #233047",
+  borderRadius: 8,
+  padding: "7px 10px",
+  fontSize: 12,
+};
+const buttonStyle = {
+  background: "#172033",
+  color: "#e5edf8",
+  border: "1px solid #334155",
+  borderRadius: 8,
+  padding: "8px 11px",
+  cursor: "pointer",
+};

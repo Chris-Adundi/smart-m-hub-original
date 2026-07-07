@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient, authService } from "@/App";
+import { apiClient } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,14 +61,13 @@ const RegisterPage = () => {
     admin_name: "",
     admin_email: "",
     admin_phone: "",
-    admin_password: "",
   });
 
   const [loading, setLoading] = useState(false);
-  const [inviteCode, setInviteCode] = useState("");
-  const [joinLink, setJoinLink] = useState("");
   const [schoolCode, setSchoolCode] = useState("");
   const [loginLink, setLoginLink] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [registered, setRegistered] = useState(false);
 
   const updateField = (field, value) => {
@@ -105,8 +104,8 @@ const RegisterPage = () => {
       return;
     }
 
-    if (!formData.admin_email || !formData.admin_password) {
-      toast.error("Admin email and password are required");
+    if (!formData.admin_email) {
+      toast.error("Admin email is required");
       return;
     }
 
@@ -126,33 +125,13 @@ const RegisterPage = () => {
 
       const data = response?.data || {};
 
-      const code =
-        data.invite_code ||
-        data.school_invite_code ||
-        "";
-
-      const slug = (formData.name || "school")
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, "-")
-        .replace(/[^a-z0-9-]/g, "");
-
-      const link =
-        data.invite_link ||
-        `${window.location.origin}/join/${slug}?code=${code}`;
-
-      setInviteCode(code);
-      setJoinLink(link);
       setSchoolCode(data.school_code || "");
-      setLoginLink(data.login_link || "");
+      setLoginLink(data.generated_credentials?.login_link || data.login_link || "");
+      setTemporaryPassword(data.generated_credentials?.temporary_password || "");
+      setUsername(data.generated_credentials?.username || formData.name);
       setRegistered(true);
 
-      toast.success("School registered successfully");
-
-      if (data.access_token && data.user) {
-        authService.setAuth(data.access_token, data.user);
-        navigate("/app/school-profile", { replace: true });
-      }
+      toast.success("School registered. Installation payment and approval are required before login.");
     } catch (error) {
       toast.error(
         error?.response?.data?.detail ||
@@ -191,7 +170,7 @@ const RegisterPage = () => {
               <AlertDescription className="text-emerald-200 space-y-4">
 
                 <div className="font-semibold text-lg">
-                  School Registered Successfully
+                  School Registered Successfully - Pending Approval
                 </div>
 
                 <div>
@@ -208,6 +187,30 @@ const RegisterPage = () => {
 
                 <div>
                   <div className="text-sm mb-1 text-slate-300">
+                    Username
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={username} readOnly className="bg-slate-900 text-white" />
+                    <Button type="button" onClick={() => copyToClipboard(username)}>
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm mb-1 text-slate-300">
+                    Temporary Password
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={temporaryPassword} readOnly className="bg-slate-900 text-white" />
+                    <Button type="button" onClick={() => copyToClipboard(temporaryPassword)}>
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm mb-1 text-slate-300">
                     School Login Link
                   </div>
                   <div className="flex gap-2">
@@ -216,46 +219,9 @@ const RegisterPage = () => {
                       <Copy className="w-4 h-4" />
                     </Button>
                   </div>
-                </div>
-
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    School Invite Code
+                  <div className="text-sm mt-2 text-slate-300">
+                    Access remains disabled until installation payment and super admin approval.
                   </div>
-
-                  <Input
-                    value={inviteCode}
-                    readOnly
-                    className="bg-slate-900 text-white"
-                  />
-
-                  <Button
-                    type="button"
-                    onClick={() => copyToClipboard(inviteCode)}
-                    className="mt-2"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </Button>
-                </div>
-
-                <div>
-                  <div className="text-sm mb-1 text-slate-300">
-                    School Join Link
-                  </div>
-
-                  <Input
-                    value={joinLink}
-                    readOnly
-                    className="bg-slate-900 text-white"
-                  />
-
-                  <Button
-                    type="button"
-                    onClick={() => copyToClipboard(joinLink)}
-                    className="mt-2"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </Button>
                 </div>
 
                 <Button
@@ -553,13 +519,8 @@ const RegisterPage = () => {
                 </div>
 
                 <div>
-                  <Label>Admin Password</Label>
-                  <Input
-                    type="password"
-                    value={formData.admin_password}
-                    onChange={(e) => updateField("admin_password", e.target.value)}
-                    required
-                  />
+                  <Label>Temporary Password</Label>
+                  <Input value="Generated automatically after submission" readOnly />
                 </div>
               </div>
             </div>

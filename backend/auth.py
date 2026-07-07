@@ -158,6 +158,22 @@ async def get_current_user(
                 detail="School access denied"
             )
 
+        school = await db.schools.find_one({"id": str(db_school_id)})
+        if not school:
+            raise HTTPException(status_code=403, detail="School not found")
+
+        approval_status = str(school.get("approval_status") or "pending").lower()
+        subscription_status = str(school.get("subscription_status") or "inactive").lower()
+
+        if approval_status != "approved":
+            raise HTTPException(status_code=403, detail="School is pending platform approval")
+
+        if school.get("is_active") is False or str(school.get("status") or "").lower() in {"suspended", "inactive"}:
+            raise HTTPException(status_code=403, detail="School access is disabled")
+
+        if subscription_status in {"expired", "suspended", "inactive"}:
+            raise HTTPException(status_code=403, detail="School subscription is not active")
+
     return {
         "user_id": str(user.get("id") or user.get("_id")),
         "role": db_role,

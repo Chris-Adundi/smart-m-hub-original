@@ -39,6 +39,7 @@ import jsPDF from "jspdf";
 
 const FeesPage = () => {
   const [payments, setPayments] = useState([]);
+  const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -49,6 +50,7 @@ const FeesPage = () => {
     payment_method: "mpesa",
     bank_reference: "",
     cheque_number: "",
+    student_id: "",
   });
 
   // ----------------------------
@@ -82,6 +84,13 @@ const FeesPage = () => {
 
   useEffect(() => {
     fetchPayments();
+    apiClient
+      .get("/students?approval_status=approved")
+      .then((response) => {
+        const data = response?.data;
+        setStudents(Array.isArray(data) ? data : data?.data || data?.students || []);
+      })
+      .catch(() => setStudents([]));
   }, [fetchPayments]);
 
   // ----------------------------
@@ -108,6 +117,7 @@ const FeesPage = () => {
         payment_method: "mpesa",
         bank_reference: "",
         cheque_number: "",
+        student_id: "",
       });
 
       fetchPayments();
@@ -143,6 +153,28 @@ const FeesPage = () => {
       default:
         return "bg-slate-100 text-slate-800";
     }
+  };
+
+  const downloadReceipt = (payment) => {
+    const student = students.find((s) => s.id === payment?.student_id) || {};
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("SMART M HUB - SCHOOL PAYMENT RECEIPT", 15, 18);
+    doc.setFontSize(11);
+    [
+      `Receipt Number: ${payment?.receipt_number || "-"}`,
+      `Receipt Date: ${payment?.created_at ? new Date(payment.created_at).toLocaleDateString() : "-"}`,
+      `Student Name: ${student.full_name || payment?.student_name || "-"}`,
+      `Admission Number: ${student.admission_number || payment?.admission_number || "-"}`,
+      `Received From: ${student.guardian_name || payment?.received_from || "-"}`,
+      `Payment Method: ${payment?.payment_method || "-"}`,
+      `Reference: ${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
+      `Item: ${payment?.payment_type || "Fees"}`,
+      `Total Paid: KES ${Number(payment?.amount || 0).toLocaleString()}`,
+      `Received By: ${payment?.submitted_by || "-"}`,
+      `Approved By: ${payment?.approved_by || "-"}`,
+    ].forEach((line, index) => doc.text(line, 15, 36 + index * 9));
+    doc.save(`${payment?.receipt_number || "receipt"}.pdf`);
   };
 
   // ----------------------------
@@ -189,6 +221,31 @@ const FeesPage = () => {
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+
+              <div className="space-y-2">
+                <Label>Student</Label>
+                <Select
+                  value={formData.student_id}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      student_id: value,
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select student" />
+                  </SelectTrigger>
+
+                  <SelectContent>
+                    {students.map((student) => (
+                      <SelectItem key={student.id} value={student.id}>
+                        {student.full_name} - {student.admission_number}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div className="space-y-2">
                 <Label>Amount (KES)</Label>
@@ -286,8 +343,10 @@ const FeesPage = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Amount</TableHead>
+                  <TableHead>Receipt</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -295,12 +354,18 @@ const FeesPage = () => {
                 {safePayments.map((p, i) => (
                   <TableRow key={p.id || i}>
                     <TableCell>{p.amount}</TableCell>
+                    <TableCell>{p.receipt_number || "-"}</TableCell>
                     <TableCell>{p.payment_method}</TableCell>
 
                     <TableCell>
                       <Badge className={getStatusColor(p.status)}>
                         {p.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline" onClick={() => downloadReceipt(p)}>
+                        Download Receipt
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

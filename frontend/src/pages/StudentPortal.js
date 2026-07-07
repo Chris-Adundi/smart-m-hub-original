@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -32,6 +32,7 @@ import {
   CreditCard,
   Download,
   TrendingUp,
+  Printer,
 } from "lucide-react";
 
 /* ---------------- SAFE HELPERS ---------------- */
@@ -63,16 +64,16 @@ const gradeColor = (g) => {
 const StudentPortal = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedStudentId, setSelectedStudentId] = useState("");
 
   const user = authService.getUser();
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const res = await apiClient.get("/portal/my-data");
+      const params = selectedStudentId
+        ? { selected_student_id: selectedStudentId }
+        : {};
+      const res = await apiClient.get("/portal/my-data", { params });
       setData(res?.data || {});
     } catch (err) {
       console.error(err);
@@ -81,10 +82,15 @@ const StudentPortal = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedStudentId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   /* ---------------- SAFE DATA ---------------- */
   const student = data?.student ?? null;
+  const children = Array.isArray(data?.children) ? data.children : [];
   const results = Array.isArray(data?.results) ? data.results : [];
   const payments = Array.isArray(data?.payments) ? data.payments : [];
   const announcements = Array.isArray(data?.announcements)
@@ -131,6 +137,82 @@ const StudentPortal = () => {
 
     doc.save("fee-statement.pdf");
     toast.success("Downloaded fee statement");
+  };
+
+  const receiptHtml = (payment) => `
+    <html>
+      <head>
+        <title>${payment?.receipt_number || "Receipt"}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+          .header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #d1d5db; padding-bottom: 16px; }
+          img { width: 72px; height: 72px; object-fit: contain; }
+          h1 { margin: 0; font-size: 22px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+          td, th { border: 1px solid #d1d5db; padding: 10px; text-align: left; }
+          .footer { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+          .line { border-bottom: 1px solid #111827; height: 32px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${payment?.school_logo ? `<img src="${payment.school_logo}" />` : ""}
+          <div>
+            <h1>SMART M HUB - SCHOOL PAYMENT RECEIPT</h1>
+            <p>${payment?.school_name || ""} | ${payment?.school_code || ""}</p>
+          </div>
+        </div>
+        <table>
+          <tbody>
+            <tr><th>Receipt Number</th><td>${payment?.receipt_number || "-"}</td></tr>
+            <tr><th>Receipt Date</th><td>${safeDate(payment?.created_at)}</td></tr>
+            <tr><th>Student Name</th><td>${payment?.student_name || student?.full_name || "-"}</td></tr>
+            <tr><th>Admission Number</th><td>${payment?.admission_number || student?.admission_number || "-"}</td></tr>
+            <tr><th>Received From</th><td>${payment?.received_from || student?.guardian_name || "-"}</td></tr>
+            <tr><th>Payment Method</th><td>${payment?.payment_method || "-"}</td></tr>
+            <tr><th>Reference</th><td>${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}</td></tr>
+            <tr><th>Item</th><td>${payment?.payment_type || "Fees"}</td></tr>
+            <tr><th>Total Paid</th><td>KES ${safeNum(payment?.amount).toLocaleString()}</td></tr>
+            <tr><th>Outstanding Balance</th><td>KES ${feeBalance.toLocaleString()}</td></tr>
+          </tbody>
+        </table>
+        <div class="footer">
+          <div><p>Received By</p><div class="line"></div></div>
+          <div><p>Approved By</p><div class="line"></div></div>
+        </div>
+      </body>
+    </html>`;
+
+  const printReceipt = (payment) => {
+    const popup = window.open("", "_blank", "width=900,height=700");
+    if (!popup) return toast.error("Popup blocked");
+    popup.document.write(receiptHtml(payment));
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
+  const downloadReceipt = (payment) => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("SMART M HUB - SCHOOL PAYMENT RECEIPT", 15, 18);
+    doc.setFontSize(11);
+    const lines = [
+      `School: ${payment?.school_name || "-"}`,
+      `School Code: ${payment?.school_code || "-"}`,
+      `Receipt Number: ${payment?.receipt_number || "-"}`,
+      `Receipt Date: ${safeDate(payment?.created_at)}`,
+      `Student: ${payment?.student_name || student?.full_name || "-"}`,
+      `Admission Number: ${payment?.admission_number || student?.admission_number || "-"}`,
+      `Received From: ${payment?.received_from || student?.guardian_name || "-"}`,
+      `Payment Method: ${payment?.payment_method || "-"}`,
+      `Reference: ${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
+      `Item: ${payment?.payment_type || "Fees"}`,
+      `Total Paid: KES ${safeNum(payment?.amount).toLocaleString()}`,
+      `Outstanding Balance: KES ${feeBalance.toLocaleString()}`,
+    ];
+    lines.forEach((line, index) => doc.text(line, 15, 34 + index * 9));
+    doc.save(`${payment?.receipt_number || "receipt"}.pdf`);
   };
 
   /* ---------------- PDF RESULTS ---------------- */
@@ -204,6 +286,23 @@ const StudentPortal = () => {
             </Badge>
 
             <Badge>{student.admission_number}</Badge>
+          </div>
+        )}
+
+        {children.length > 1 && (
+          <div className="mt-4">
+            <p className="text-xs text-slate-400 mb-2">Child</p>
+            <select
+              className="bg-[#0F172A] border border-[#1E293B] text-white rounded-lg px-3 py-2"
+              value={selectedStudentId || student?.id || ""}
+              onChange={(e) => setSelectedStudentId(e.target.value)}
+            >
+              {children.map((child) => (
+                <option key={child.id} value={child.id}>
+                  {child.full_name} - {child.admission_number}
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>
@@ -316,6 +415,15 @@ const StudentPortal = () => {
                 <p className="text-slate-400">No payments found</p>
               ) : (
                 <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Receipt</TableHead>
+                    </TableRow>
+                  </TableHeader>
                   <TableBody>
                     {payments.map((p, i) => (
                       <TableRow key={p?.id || i}>
@@ -323,6 +431,18 @@ const StudentPortal = () => {
                         <TableCell>KES {safeNum(p?.amount)}</TableCell>
                         <TableCell>{p?.payment_method || "-"}</TableCell>
                         <TableCell>{p?.status || "-"}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => downloadReceipt(p)}>
+                              <Download className="w-3 h-3 mr-1" />
+                              PDF
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => printReceipt(p)}>
+                              <Printer className="w-3 h-3 mr-1" />
+                              Print
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
