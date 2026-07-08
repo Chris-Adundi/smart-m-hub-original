@@ -632,6 +632,7 @@ class InitiatePaymentRequest(BaseModel):
     cheque_number: Optional[str] = None
 
     description: Optional[str] = None
+    receipt_url: Optional[str] = None
 
 
 class MarkAttendanceRequest(BaseModel):
@@ -700,6 +701,16 @@ class CreateTransactionRequest(BaseModel):
     description: str
 
     date: Optional[str] = None
+
+
+class CreateFeeStructureRequest(BaseModel):
+
+    class_name: str
+    term: Optional[str] = None
+    academic_year: Optional[str] = None
+    amount: float
+    description: Optional[str] = None
+    document_url: Optional[str] = None
 
 
 class ProgressStudentsRequest(BaseModel):
@@ -3425,6 +3436,7 @@ async def initiate_payment(
             "bank_reference": request.bank_reference,
             "cheque_number": request.cheque_number,
             "description": request.description,
+            "receipt_url": request.receipt_url,
 
             # =========================
             # PAYMENT STATE
@@ -4933,6 +4945,73 @@ async def get_my_portal_data(
 # FINANCE TRANSACTIONS (FIXED + CONSISTENT)
 # ─────────────────────────────────────────────
 
+@api_router.get("/finance/fee-structures")
+async def get_fee_structures(current_user: dict = Depends(get_current_user)):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "finance", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    return await db.fee_structures.find(
+        {"school_id": school_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+
+
+@api_router.post("/finance/fee-structures")
+async def create_fee_structure(
+    request: CreateFeeStructureRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "finance"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if request.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "class_name": request.class_name.strip(),
+        "term": request.term,
+        "academic_year": request.academic_year,
+        "amount": request.amount,
+        "description": request.description,
+        "document_url": request.document_url,
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+    if not record["class_name"]:
+        raise HTTPException(status_code=400, detail="Class name is required")
+
+    await db.fee_structures.insert_one(record)
+    await log_security_event(
+        "fee_structure_created",
+        current_user,
+        {
+            "fee_structure_id": record["id"],
+            "class_name": record["class_name"],
+            "amount": record["amount"],
+        }
+    )
+
+    return {
+        "success": True,
+        "message": "Fee structure created",
+        "fee_structure": serialize_doc(record)
+    }
+
+
 @api_router.post("/finance/transactions")
 async def create_transaction(
     request: CreateTransactionRequest,
@@ -5347,6 +5426,7 @@ async def ensure_database_indexes():
         (db.platform_invoices, [("school_id", 1), ("invoice_type", 1), ("billing_month", 1)], {"name": "invoices_school_type_month_idx"}),
         (db.platform_invoices, [("status", 1), ("due_date", 1)], {"name": "invoices_status_due_date_idx"}),
         (db.subscription_reminders, [("school_id", 1), ("billing_month", 1), ("reminder_type", 1)], {"name": "reminders_school_month_type_idx"}),
+        (db.fee_structures, [("school_id", 1), ("class_name", 1)], {"name": "fee_structures_school_class_idx"}),
     ]
 
     for collection, keys, options in index_specs:

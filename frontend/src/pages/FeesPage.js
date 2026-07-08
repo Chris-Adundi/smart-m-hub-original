@@ -36,6 +36,7 @@ import { apiClient } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import jsPDF from "jspdf";
+import { uploadManagedFile } from "@/utils/uploads";
 
 const FeesPage = () => {
   const [payments, setPayments] = useState([]);
@@ -51,6 +52,7 @@ const FeesPage = () => {
     bank_reference: "",
     cheque_number: "",
     student_id: "",
+    receipt_url: "",
   });
 
   // ----------------------------
@@ -118,6 +120,7 @@ const FeesPage = () => {
         bank_reference: "",
         cheque_number: "",
         student_id: "",
+        receipt_url: "",
       });
 
       fetchPayments();
@@ -125,6 +128,17 @@ const FeesPage = () => {
       toast.error(
         error?.response?.data?.detail || "Failed to record payment"
       );
+    }
+  };
+
+  const handleReceiptUpload = async (file) => {
+    if (!file) return;
+    try {
+      const url = await uploadManagedFile(file, "receipt");
+      setFormData((prev) => ({ ...prev, receipt_url: url }));
+      toast.success("Receipt uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Receipt upload failed");
     }
   };
 
@@ -316,6 +330,12 @@ const FeesPage = () => {
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label>Receipt Attachment</Label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => handleReceiptUpload(e.target.files?.[0])} />
+                {formData.receipt_url && <p className="text-xs text-emerald-400">Receipt uploaded</p>}
+              </div>
+
               <Button type="submit" className="w-full">
                 Record Payment
               </Button>
@@ -346,6 +366,7 @@ const FeesPage = () => {
                   <TableHead>Receipt</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Attachment</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -361,6 +382,13 @@ const FeesPage = () => {
                       <Badge className={getStatusColor(p.status)}>
                         {p.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {p.receipt_url ? (
+                        <a className="text-emerald-400 underline" href={p.receipt_url} target="_blank" rel="noreferrer">
+                          Open
+                        </a>
+                      ) : "-"}
                     </TableCell>
                     <TableCell>
                       <Button size="sm" variant="outline" onClick={() => downloadReceipt(p)}>

@@ -41,6 +41,7 @@ import {
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
+import { uploadManagedFile } from "@/utils/uploads";
 
 // =========================
 // SAFE NUMBER FORMATTER
@@ -55,9 +56,11 @@ const FinancePortal = () => {
 
   const [payments, setPayments] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [feeStructures, setFeeStructures] = useState([]);
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(true);
   const [txnDialogOpen, setTxnDialogOpen] = useState(false);
+  const [feeDialogOpen, setFeeDialogOpen] = useState(false);
 
   const [txnForm, setTxnForm] = useState({
     transaction_type: "income",
@@ -65,6 +68,15 @@ const FinancePortal = () => {
     amount: "",
     description: "",
     date: new Date().toISOString().split("T")[0],
+  });
+
+  const [feeForm, setFeeForm] = useState({
+    class_name: "",
+    term: "",
+    academic_year: new Date().getFullYear().toString(),
+    amount: "",
+    description: "",
+    document_url: "",
   });
 
   const incomeCategories = [
@@ -93,10 +105,11 @@ const FinancePortal = () => {
       try {
         setLoading(true);
 
-        const [paymentsRes, txnRes, summaryRes] = await Promise.all([
+        const [paymentsRes, txnRes, summaryRes, feesRes] = await Promise.all([
           apiClient.get("/payments?approval_status=all").catch(() => ({ data: [] })),
           apiClient.get("/finance/transactions").catch(() => ({ data: [] })),
           apiClient.get("/finance/summary").catch(() => ({ data: {} })),
+          apiClient.get("/finance/fee-structures").catch(() => ({ data: [] })),
         ]);
 
         if (!mounted) return;
@@ -116,8 +129,15 @@ const FinancePortal = () => {
             txnRes?.data?.transactions ||
             txnRes?.data?.results ||
             []
-      );
+        );
         setSummary(summaryRes?.data || {});
+        setFeeStructures(
+          Array.isArray(feesRes?.data)
+            ? feesRes.data
+            : feesRes?.data?.data ||
+              feesRes?.data?.fee_structures ||
+              []
+        );
       } catch (error) {
         toast.error("Failed to fetch finance data");
       } finally {
@@ -162,6 +182,45 @@ const FinancePortal = () => {
     }
   };
 
+  const handleFeeDocumentUpload = async (file) => {
+    if (!file) return;
+    try {
+      const url = await uploadManagedFile(file, "document");
+      setFeeForm((prev) => ({ ...prev, document_url: url }));
+      toast.success("Fee document uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Document upload failed");
+    }
+  };
+
+  const handleAddFeeStructure = async (e) => {
+    e.preventDefault();
+
+    try {
+      await apiClient.post("/finance/fee-structures", {
+        ...feeForm,
+        amount: Number(feeForm.amount || 0),
+      });
+
+      toast.success("Fee structure saved");
+      setFeeDialogOpen(false);
+
+      setFeeForm({
+        class_name: "",
+        term: "",
+        academic_year: new Date().getFullYear().toString(),
+        amount: "",
+        description: "",
+        document_url: "",
+      });
+
+      const res = await apiClient.get("/finance/fee-structures");
+      setFeeStructures(Array.isArray(res?.data) ? res.data : res?.data?.data || []);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to save fee structure");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center py-20 text-slate-400">
@@ -182,7 +241,59 @@ const FinancePortal = () => {
       </div>
 
       {/* ACTION */}
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-3">
+        <Dialog open={feeDialogOpen} onOpenChange={setFeeDialogOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Fee Structure
+            </Button>
+          </DialogTrigger>
+
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Fee Structure</DialogTitle>
+            </DialogHeader>
+
+            <form onSubmit={handleAddFeeStructure} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Class</Label>
+                <Input value={feeForm.class_name} onChange={(e) => setFeeForm({ ...feeForm, class_name: e.target.value })} required />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Term</Label>
+                  <Input value={feeForm.term} onChange={(e) => setFeeForm({ ...feeForm, term: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Academic Year</Label>
+                  <Input value={feeForm.academic_year} onChange={(e) => setFeeForm({ ...feeForm, academic_year: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Amount (KES)</Label>
+                <Input type="number" value={feeForm.amount} onChange={(e) => setFeeForm({ ...feeForm, amount: e.target.value })} required />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea value={feeForm.description} onChange={(e) => setFeeForm({ ...feeForm, description: e.target.value })} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Fee Document</Label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => handleFeeDocumentUpload(e.target.files?.[0])} />
+                {feeForm.document_url && <p className="text-xs text-emerald-400">Document uploaded</p>}
+              </div>
+
+              <Button type="submit" className="w-full">
+                Save Fee Structure
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
         <Dialog open={txnDialogOpen} onOpenChange={setTxnDialogOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -314,6 +425,7 @@ const FinancePortal = () => {
         <TabsList>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="fee_structures">Fee Structures</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transactions">
@@ -342,12 +454,58 @@ const FinancePortal = () => {
 
         <TabsContent value="payments">
           <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Receipt</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Attachment</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               {payments.map((p, i) => (
                 <TableRow key={p?.id || i}>
                   <TableCell>{p?.receipt_number || "—"}</TableCell>
                   <TableCell>KES {money(p?.amount).toLocaleString()}</TableCell>
                   <TableCell>{p?.status || "pending"}</TableCell>
+                  <TableCell>
+                    {p?.receipt_url ? (
+                      <a className="text-emerald-400 underline" href={p.receipt_url} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    ) : "N/A"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TabsContent>
+
+        <TabsContent value="fee_structures">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Class</TableHead>
+                <TableHead>Term</TableHead>
+                <TableHead>Year</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Document</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {feeStructures.map((fee, i) => (
+                <TableRow key={fee?.id || i}>
+                  <TableCell>{fee?.class_name}</TableCell>
+                  <TableCell>{fee?.term || "N/A"}</TableCell>
+                  <TableCell>{fee?.academic_year || "N/A"}</TableCell>
+                  <TableCell>KES {money(fee?.amount).toLocaleString()}</TableCell>
+                  <TableCell>
+                    {fee?.document_url ? (
+                      <a className="text-emerald-400 underline" href={fee.document_url} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    ) : "N/A"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
