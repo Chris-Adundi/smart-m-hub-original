@@ -53,12 +53,13 @@ def uptime_label():
     return f"{minutes}m"
 
 
-def upload_storage_usage():
+def upload_storage_usage(school_id=None):
     total_bytes = 0
     total_files = 0
-    if not UPLOAD_ROOT.exists():
+    root = UPLOAD_ROOT / str(school_id) if school_id else UPLOAD_ROOT
+    if not root.exists():
         return {"used_mb": 0, "files": 0}
-    for path in UPLOAD_ROOT.rglob("*"):
+    for path in root.rglob("*"):
         if path.is_file():
             total_files += 1
             total_bytes += path.stat().st_size
@@ -334,6 +335,8 @@ async def get_school_detail(school_id: str, user=Depends(require_super_admin)):
     invoices = await db.platform_invoices.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     tickets = await db.support_tickets.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
     logs = await db.audit_logs.find({"school_id": school_id}, {"_id": 0}).sort("timestamp", -1).limit(100).to_list(100)
+    today = datetime.now(timezone.utc).date().isoformat()
+    audit_today = sum(1 for log in logs if is_today(log.get("timestamp"), today))
 
     detail = await serialize_school(school)
     detail.update({
@@ -359,8 +362,8 @@ async def get_school_detail(school_id: str, user=Depends(require_super_admin)):
         },
         "system_usage": {"active_users": sum(1 for u in users if u.get("is_active") is not False)},
         "login_history": [u for u in users if u.get("last_login")],
-        "api_usage": {"requests_today": 0},
-        "storage_usage": {"used_mb": 0},
+        "api_usage": {"requests_today": audit_today, "recent_events": len(logs)},
+        "storage_usage": upload_storage_usage(school_id),
         "support_tickets": tickets,
         "audit_logs": logs,
         "recent_activities": logs[:10],
