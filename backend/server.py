@@ -3507,7 +3507,7 @@ async def initiate_payment(
             status_code=500,
             detail="Internal server error"
         )
-@app.get("/api/payments")
+@api_router.get("/payments")
 async def get_payments(
     approval_status: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -5170,9 +5170,9 @@ async def progress_students(
         # =========================
         # ROLE SAFETY FIX (IMPORTANT)
         # =========================
-        role = (current_user.get("role") or "").upper()
+        role = normalize_role(current_user.get("role"))
 
-        if role != "SCHOOL_ADMIN":
+        if role != "school_admin":
             raise HTTPException(status_code=403, detail="Admin access required")
 
         query = {
@@ -5278,12 +5278,12 @@ async def get_student_history(
         # =========================
         # ROLE SAFETY (ADDED FIX)
         # =========================
-        role = (current_user.get("role") or "").upper()
+        role = normalize_role(current_user.get("role"))
 
         allowed_roles = [
-            "SCHOOL_ADMIN",
-            "TEACHER",
-            "SECRETARY"
+            "school_admin",
+            "teacher",
+            "secretary"
         ]
 
         if role not in allowed_roles:
@@ -5328,6 +5328,35 @@ async def get_student_history(
 
 
 # ─── App Setup ────────────────────────────────────────────────────
+
+async def ensure_database_indexes():
+    index_specs = [
+        (db.schools, [("school_code", 1)], {"unique": True, "sparse": True, "name": "unique_school_code"}),
+        (db.schools, [("id", 1)], {"name": "school_id_idx"}),
+        (db.users, [("school_id", 1), ("email", 1)], {"name": "users_school_email_idx"}),
+        (db.users, [("id", 1)], {"name": "users_id_idx"}),
+        (db.students, [("school_id", 1), ("admission_number", 1)], {"name": "students_school_admission_idx"}),
+        (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
+        (db.staff, [("school_id", 1), ("employee_number", 1)], {"name": "staff_school_employee_idx"}),
+        (db.payments, [("school_id", 1), ("created_at", -1)], {"name": "payments_school_created_idx"}),
+        (db.attendance, [("school_id", 1), ("date", -1)], {"name": "attendance_school_date_idx"}),
+        (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
+        (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
+        (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
+        (db.login_attempts, [("key", 1)], {"unique": True, "name": "login_attempt_key_idx"}),
+    ]
+
+    for collection, keys, options in index_specs:
+        try:
+            await collection.create_index(keys, **options)
+        except Exception as exc:
+            logger.warning("Index creation skipped for %s: %s", collection.name, exc)
+
+
+@app.on_event("startup")
+async def startup_tasks():
+    await ensure_database_indexes()
+
 
 app.include_router(api_router)
 
