@@ -175,7 +175,11 @@ apiClient.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  config.headers["Content-Type"] = "application/json";
+  if (config.data instanceof FormData) {
+    delete config.headers["Content-Type"];
+  } else {
+    config.headers["Content-Type"] = "application/json";
+  }
 
   return config;
 });

@@ -713,6 +713,28 @@ class CreateFeeStructureRequest(BaseModel):
     document_url: Optional[str] = None
 
 
+class CreateTimetableRequest(BaseModel):
+
+    class_name: str
+    day: str
+    subject: str
+    time: str
+    teacher_name: Optional[str] = None
+    room: Optional[str] = None
+    document_url: Optional[str] = None
+
+
+class CreateInventoryItemRequest(BaseModel):
+
+    name: str
+    quantity: int = 0
+    category: Optional[str] = None
+    location: Optional[str] = None
+    condition: Optional[str] = None
+    reorder_level: Optional[int] = 0
+    notes: Optional[str] = None
+
+
 class ProgressStudentsRequest(BaseModel):
 
     academic_year: str
@@ -4945,6 +4967,197 @@ async def get_my_portal_data(
 # FINANCE TRANSACTIONS (FIXED + CONSISTENT)
 # ─────────────────────────────────────────────
 
+@api_router.get("/timetable")
+async def get_timetable(current_user: dict = Depends(get_current_user)):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "teacher", "secretary", "student"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    return await db.timetable.find(
+        {"school_id": school_id},
+        {"_id": 0}
+    ).sort([("class_name", 1), ("day_order", 1), ("time", 1)]).to_list(1000)
+
+
+@api_router.post("/timetable")
+async def create_timetable_entry(
+    request: CreateTimetableRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "teacher", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    day_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    day_key = request.day.strip().lower()
+    record = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "class_name": request.class_name.strip(),
+        "day": request.day.strip(),
+        "day_order": day_order.index(day_key) if day_key in day_order else 99,
+        "subject": request.subject.strip(),
+        "time": request.time.strip(),
+        "teacher_name": request.teacher_name,
+        "room": request.room,
+        "document_url": request.document_url,
+        "version": 1,
+        "version_history": [],
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+    if not record["class_name"] or not record["day"] or not record["subject"] or not record["time"]:
+        raise HTTPException(status_code=400, detail="Class, day, subject and time are required")
+
+    await db.timetable.insert_one(record)
+    await log_security_event("timetable_entry_created", current_user, {"timetable_id": record["id"], "class_name": record["class_name"]})
+    return {"success": True, "message": "Timetable entry saved", "entry": serialize_doc(record)}
+
+
+@api_router.patch("/timetable/{entry_id}")
+async def update_timetable_entry(
+    entry_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "teacher", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    existing = await db.timetable.find_one({"id": entry_id, "school_id": school_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Timetable entry not found")
+
+    allowed = ["class_name", "day", "subject", "time", "teacher_name", "room", "document_url"]
+    update = {key: data[key] for key in allowed if key in data}
+    if "day" in update:
+        day_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        day_key = str(update["day"]).strip().lower()
+        update["day_order"] = day_order.index(day_key) if day_key in day_order else 99
+
+    update["version"] = int(existing.get("version") or 1) + 1
+    update["updated_at"] = now_iso()
+    update["updated_by"] = current_user.get("user_id") or current_user.get("id")
+
+    history = serialize_doc({key: existing.get(key) for key in allowed + ["version", "updated_at"]})
+    await db.timetable.update_one(
+        {"id": entry_id, "school_id": school_id},
+        {"$set": update, "$push": {"version_history": history}}
+    )
+    await log_security_event("timetable_entry_updated", current_user, {"timetable_id": entry_id})
+    return {"success": True, "message": "Timetable entry updated"}
+
+
+@api_router.get("/inventory")
+async def get_inventory(current_user: dict = Depends(get_current_user)):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    return await db.inventory.find(
+        {"school_id": school_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+
+
+@api_router.post("/inventory")
+async def create_inventory_item(
+    request: CreateInventoryItemRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if request.quantity < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "name": request.name.strip(),
+        "quantity": request.quantity,
+        "category": request.category,
+        "location": request.location,
+        "condition": request.condition,
+        "reorder_level": request.reorder_level or 0,
+        "notes": request.notes,
+        "history": [],
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+    if not record["name"]:
+        raise HTTPException(status_code=400, detail="Item name is required")
+
+    await db.inventory.insert_one(record)
+    await log_security_event("inventory_item_created", current_user, {"inventory_id": record["id"], "name": record["name"]})
+    return {"success": True, "message": "Inventory item saved", "item": serialize_doc(record)}
+
+
+@api_router.patch("/inventory/{item_id}")
+async def update_inventory_item(
+    item_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "secretary"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    existing = await db.inventory.find_one({"id": item_id, "school_id": school_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+
+    allowed = ["name", "quantity", "category", "location", "condition", "reorder_level", "notes"]
+    update = {key: data[key] for key in allowed if key in data}
+    if "quantity" in update and int(update["quantity"]) < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+    update["updated_at"] = now_iso()
+    update["updated_by"] = current_user.get("user_id") or current_user.get("id")
+
+    history = {
+        "action": "updated",
+        "before": serialize_doc({key: existing.get(key) for key in allowed}),
+        "after": update,
+        "by": update["updated_by"],
+        "timestamp": update["updated_at"],
+    }
+    await db.inventory.update_one(
+        {"id": item_id, "school_id": school_id},
+        {"$set": update, "$push": {"history": history}}
+    )
+    await log_security_event("inventory_item_updated", current_user, {"inventory_id": item_id})
+    return {"success": True, "message": "Inventory item updated"}
+
+
 @api_router.get("/finance/fee-structures")
 async def get_fee_structures(current_user: dict = Depends(get_current_user)):
     school_id = current_user.get("school_id")
@@ -5427,6 +5640,8 @@ async def ensure_database_indexes():
         (db.platform_invoices, [("status", 1), ("due_date", 1)], {"name": "invoices_status_due_date_idx"}),
         (db.subscription_reminders, [("school_id", 1), ("billing_month", 1), ("reminder_type", 1)], {"name": "reminders_school_month_type_idx"}),
         (db.fee_structures, [("school_id", 1), ("class_name", 1)], {"name": "fee_structures_school_class_idx"}),
+        (db.timetable, [("school_id", 1), ("class_name", 1), ("day_order", 1)], {"name": "timetable_school_class_day_idx"}),
+        (db.inventory, [("school_id", 1), ("category", 1)], {"name": "inventory_school_category_idx"}),
     ]
 
     for collection, keys, options in index_specs:
