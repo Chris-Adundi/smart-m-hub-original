@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
+import { uploadManagedFile } from "@/utils/uploads";
 
 const SecretaryPortal = () => {
   const [students, setStudents] = useState([]);
@@ -34,7 +36,40 @@ const SecretaryPortal = () => {
 
   const initialStudentForm = {
     admission_number: "",
+    passport_photo_url: "",
     full_name: "",
+    gender: "male",
+    date_of_birth: "",
+    birth_certificate_no: "",
+    nationality: "Kenyan",
+    religion: "",
+    special_needs: "",
+    status: "active",
+    class_name: "",
+    stream: "",
+    year_of_study: "",
+    guardian_name: "",
+    guardian_relationship: "parent",
+    guardian_phone: "",
+    guardian_email: "",
+    guardian_occupation: "",
+    guardian_national_id: "",
+    guardian_address: "",
+    secondary_guardian_name: "",
+    secondary_guardian_relationship: "",
+    secondary_guardian_phone: "",
+    secondary_guardian_email: "",
+    secondary_guardian_occupation: "",
+    secondary_guardian_national_id: "",
+    secondary_guardian_address: "",
+    chronic_conditions: "",
+    allergies: "",
+    medication: "",
+    hospital_letter_url: "",
+    previous_school: "",
+    transfer_reason: "",
+    last_class: "",
+    documents_attached: [],
   };
 
   const [studentForm, setStudentForm] = useState(initialStudentForm);
@@ -105,6 +140,30 @@ const SecretaryPortal = () => {
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create student");
     }
+  };
+
+  const updateStudentField = (field, value) => {
+    setStudentForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const uploadStudentFile = async (field, file, category) => {
+    if (!file) return;
+    try {
+      const url = await uploadManagedFile(file, category);
+      updateStudentField(field, url);
+      toast.success("File uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "File upload failed");
+    }
+  };
+
+  const toggleStudentDocument = (name, checked) => {
+    setStudentForm((prev) => ({
+      ...prev,
+      documents_attached: checked
+        ? [...(prev.documents_attached || []), name]
+        : (prev.documents_attached || []).filter((item) => item !== name),
+    }));
   };
 
   const handleAnnouncementSubmit = async (e) => {
@@ -200,7 +259,7 @@ const SecretaryPortal = () => {
                   </Button>
                 </DialogTrigger>
 
-                <DialogContent>
+                <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle>
                       Register Student
@@ -211,29 +270,88 @@ const SecretaryPortal = () => {
                     onSubmit={handleStudentSubmit}
                     className="space-y-3"
                   >
-                    <Input
-                      placeholder="Full Name"
-                      value={studentForm.full_name}
-                      onChange={(e) =>
-                        setStudentForm({
-                          ...studentForm,
-                          full_name: e.target.value,
-                        })
-                      }
-                      required
-                    />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <Label>Admission Number</Label>
+                        <Input value="Generated automatically if left blank" readOnly />
+                      </div>
+                      <div>
+                        <Label>Passport Photo</Label>
+                        <Input type="file" accept="image/*" onChange={(e) => uploadStudentFile("passport_photo_url", e.target.files?.[0], "student_photo")} />
+                        {studentForm.passport_photo_url && <p className="text-xs text-emerald-400 mt-1">Photo uploaded</p>}
+                      </div>
+                      {[
+                        ["full_name", "Full Name"],
+                        ["gender", "Gender"],
+                        ["date_of_birth", "Date of Birth", "date"],
+                        ["birth_certificate_no", "Birth Certificate No."],
+                        ["nationality", "Nationality"],
+                        ["religion", "Religion"],
+                        ["class_name", "Class"],
+                        ["stream", "Stream"],
+                        ["year_of_study", "Boarding/Day"],
+                        ["guardian_name", "Guardian 1 Name"],
+                        ["guardian_relationship", "Guardian 1 Relationship"],
+                        ["guardian_phone", "Guardian 1 Phone"],
+                        ["guardian_email", "Guardian 1 Email", "email"],
+                        ["guardian_occupation", "Guardian 1 Occupation"],
+                        ["guardian_national_id", "Guardian 1 National ID"],
+                        ["guardian_address", "Guardian 1 Address"],
+                        ["secondary_guardian_name", "Guardian 2 Name"],
+                        ["secondary_guardian_relationship", "Guardian 2 Relationship"],
+                        ["secondary_guardian_phone", "Guardian 2 Phone"],
+                        ["secondary_guardian_email", "Guardian 2 Email", "email"],
+                        ["secondary_guardian_occupation", "Guardian 2 Occupation"],
+                        ["secondary_guardian_national_id", "Guardian 2 National ID"],
+                        ["secondary_guardian_address", "Guardian 2 Address"],
+                        ["previous_school", "Previous School"],
+                        ["transfer_reason", "Reason for Transfer"],
+                        ["last_class", "Last Class"],
+                      ].map(([field, label, type]) => (
+                        <div key={field}>
+                          <Label>{label}</Label>
+                          <Input
+                            type={type || "text"}
+                            value={studentForm[field] || ""}
+                            onChange={(e) => updateStudentField(field, e.target.value)}
+                            required={field === "full_name"}
+                          />
+                        </div>
+                      ))}
+                      <div className="md:col-span-2">
+                        <Label>Special Needs</Label>
+                        <Textarea value={studentForm.special_needs} onChange={(e) => updateStudentField("special_needs", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Medical Conditions</Label>
+                        <Textarea value={studentForm.chronic_conditions} onChange={(e) => updateStudentField("chronic_conditions", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Allergies</Label>
+                        <Textarea value={studentForm.allergies} onChange={(e) => updateStudentField("allergies", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Medication</Label>
+                        <Textarea value={studentForm.medication} onChange={(e) => updateStudentField("medication", e.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Hospital Letter</Label>
+                        <Input type="file" accept="image/*,.pdf" onChange={(e) => uploadStudentFile("hospital_letter_url", e.target.files?.[0], "medical_letter")} />
+                        {studentForm.hospital_letter_url && <p className="text-xs text-emerald-400 mt-1">Hospital letter uploaded</p>}
+                      </div>
+                    </div>
 
-                    <Input
-                      placeholder="Admission Number"
-                      value={studentForm.admission_number}
-                      onChange={(e) =>
-                        setStudentForm({
-                          ...studentForm,
-                          admission_number: e.target.value,
-                        })
-                      }
-                      required
-                    />
+                    <div className="bg-[#0F172A] border border-[#1E293B] rounded-lg p-3">
+                      <Label>Documents Attached</Label>
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-sm text-slate-300">
+                        {["Birth Certificate", "Passport Photo", "Previous assessment book", "Other"].map((doc) => (
+                          <label key={doc} className="flex items-center gap-2">
+                            <input type="checkbox" checked={(studentForm.documents_attached || []).includes(doc)} onChange={(e) => toggleStudentDocument(doc, e.target.checked)} />
+                            {doc}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
 
                     <Button type="submit" className="w-full">
                       Submit (Pending Approval)
