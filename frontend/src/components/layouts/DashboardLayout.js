@@ -23,6 +23,7 @@ import {
   User,
   FileText,
   Building2,
+  LifeBuoy,
 } from "lucide-react";
 
 // =========================
@@ -121,6 +122,12 @@ const MENU_ITEMS = [
     icon: Bell,
     label: "Announcements",
     path: "/app/announcements",
+    roles: ["school_admin", "secretary", "teacher", "finance", "student"],
+  },
+  {
+    icon: LifeBuoy,
+    label: "Support",
+    path: "/app/support",
     roles: ["school_admin", "secretary", "teacher", "finance", "student"],
   },
   {

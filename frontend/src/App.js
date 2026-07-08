@@ -37,6 +37,7 @@ import AttendancePage from "@/pages/AttendancePage";
 import ExamsPage from "@/pages/ExamsPage";
 import TimetablePage from "@/pages/TimetablePage";
 import InventoryPage from "@/pages/InventoryPage";
+import SupportPage from "@/pages/SupportPage";
 
 // ======================
 // PORTALS
@@ -272,6 +273,14 @@ school_profile: ["super_admin", "school_admin"],
     "secretary",
     "teacher",
     "finance",
+    "student",
+  ],
+
+  support: [
+    "school_admin",
+    "teacher",
+    "finance",
+    "secretary",
     "student",
   ],
 
@@ -551,6 +560,16 @@ function App() {
                 element={
                   <RoleProtectedRoute routeKey="announcements">
                     <AnnouncementsPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              {/* SUPPORT */}
+              <Route
+                path="support"
+                element={
+                  <RoleProtectedRoute routeKey="support">
+                    <SupportPage />
                   </RoleProtectedRoute>
                 }
               />

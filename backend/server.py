@@ -5081,6 +5081,94 @@ async def get_my_portal_data(
 # FINANCE TRANSACTIONS (FIXED + CONSISTENT)
 # ─────────────────────────────────────────────
 
+@api_router.get("/support-tickets")
+async def get_school_support_tickets(current_user: dict = Depends(get_current_user)):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    tickets = await db.support_tickets.find(
+        {"school_id": school_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return tickets
+
+
+@api_router.post("/support-tickets")
+async def create_school_support_ticket(
+    data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    subject = str(data.get("subject") or "").strip()
+    message = str(data.get("message") or "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="Subject and message are required")
+
+    ticket = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "subject": subject,
+        "message": message,
+        "priority": data.get("priority") or "normal",
+        "status": "open",
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_by_email": current_user.get("email"),
+        "replies": [],
+        "internal_notes": [],
+        "resolution_history": [],
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.support_tickets.insert_one(ticket)
+    await log_security_event("support_ticket_created", current_user, {"ticket_id": ticket["id"], "priority": ticket["priority"]})
+    return {"success": True, "message": "Support ticket created", "ticket": serialize_doc(ticket)}
+
+
+@api_router.patch("/support-tickets/{ticket_id}")
+async def update_school_support_ticket(
+    ticket_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    ticket = await db.support_tickets.find_one({"id": ticket_id, "school_id": school_id})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+
+    update = {"updated_at": now_iso()}
+    if data.get("status") in ["open", "closed", "resolved"]:
+        update["status"] = data["status"]
+
+    operation = {"$set": update}
+    if data.get("reply"):
+        operation["$push"] = {
+            "replies": {
+                "message": data["reply"],
+                "by": current_user.get("email"),
+                "created_at": now_iso(),
+            }
+        }
+
+    await db.support_tickets.update_one({"id": ticket_id, "school_id": school_id}, operation)
+    await log_security_event("support_ticket_updated", current_user, {"ticket_id": ticket_id, "status": update.get("status")})
+    return {"success": True, "message": "Support ticket updated"}
+
+
 @api_router.get("/timetable")
 async def get_timetable(current_user: dict = Depends(get_current_user)):
     school_id = current_user.get("school_id")
@@ -5749,6 +5837,7 @@ async def ensure_database_indexes():
         (db.attendance_summaries, [("school_id", 1), ("week", -1), ("status", 1)], {"name": "attendance_summary_school_week_status_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
+        (db.support_tickets, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "support_school_status_created_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
         (db.login_attempts, [("key", 1)], {"unique": True, "name": "login_attempt_key_idx"}),
         (db.platform_invoices, [("school_id", 1), ("invoice_type", 1), ("billing_month", 1)], {"name": "invoices_school_type_month_idx"}),
