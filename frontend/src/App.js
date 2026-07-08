@@ -53,11 +53,6 @@ import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import AnnouncementsPage from "@/pages/AnnouncementsPage";
 
 // ======================
-// DEBUG
-// ======================
-import DataExplorer from "@/pages/DataExplorer";
-
-// ======================
 // BACKEND (SINGLE SOURCE OF TRUTH)
 // ======================
 const BACKEND_URL =
@@ -186,8 +181,6 @@ apiClient.interceptors.request.use((config) => {
 
   config.headers["Content-Type"] = "application/json";
 
-  console.log("API REQUEST:", config.method, config.url);
-
   return config;
 });
 
@@ -198,8 +191,6 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
-
-    console.log("API ERROR:", status, error?.config?.url);
 
     if (status === 401) {
       authService.clearAuth();
@@ -319,14 +310,6 @@ school_profile: ["super_admin", "school_admin"],
     "super_admin",
   ],
 
-  // =========================
-  // DEBUG
-  // =========================
-
-  debug: [
-    "super_admin",
-    "school_admin",
-  ],
 };
 
 // ======================
@@ -638,16 +621,6 @@ function App() {
                   </RoleProtectedRoute>
                 }
               />
-              {/* DEBUG */}
-              <Route
-                path="debug"
-                element={
-                  <RoleProtectedRoute routeKey="debug">
-                    <DataExplorer />
-                  </RoleProtectedRoute>
-                }
-              />
-
             </Route>
           </Route>
 

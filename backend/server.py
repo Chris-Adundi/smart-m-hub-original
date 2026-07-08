@@ -1,6 +1,7 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
@@ -86,6 +87,10 @@ db = client[db_name]
 # FASTAPI APP SETUP
 # =====================================================
 app = FastAPI()
+
+UPLOAD_ROOT = ROOT_DIR / "uploads"
+UPLOAD_ROOT.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
@@ -442,6 +447,42 @@ def school_branding_payload(school: dict) -> dict:
     }
 
 
+ALLOWED_UPLOAD_CATEGORIES = {
+    "school_logo",
+    "student_photo",
+    "medical_letter",
+    "receipt",
+    "document",
+}
+ALLOWED_UPLOAD_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "application/pdf": ".pdf",
+}
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "5")) * 1024 * 1024
+
+
+def validate_upload_category(category: str) -> str:
+    normalized = str(category or "document").strip().lower().replace(" ", "_")
+    if normalized not in ALLOWED_UPLOAD_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid upload category")
+    return normalized
+
+
+def validate_upload_file(file: UploadFile) -> str:
+    content_type = str(file.content_type or "").lower()
+    extension = ALLOWED_UPLOAD_TYPES.get(content_type)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    original_suffix = Path(file.filename or "").suffix.lower()
+    if original_suffix and original_suffix not in set(ALLOWED_UPLOAD_TYPES.values()):
+        raise HTTPException(status_code=400, detail="Invalid file extension")
+
+    return extension
+
+
 # =====================================================
 # REQUEST MODELS
 # =====================================================
@@ -772,8 +813,56 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
             } if admin_user else None
         }
     }
-from fastapi import UploadFile, File
-import base64
+
+
+@api_router.post("/uploads")
+async def upload_file(
+    file: UploadFile = File(...),
+    category: str = Form("document"),
+    current_user: dict = Depends(get_current_user)
+):
+    upload_category = validate_upload_category(category)
+    extension = validate_upload_file(file)
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id") if role != "super_admin" else "platform"
+
+    if role != "super_admin" and not school_id:
+        raise HTTPException(status_code=403, detail="School context required")
+
+    payload = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds upload size limit")
+
+    safe_school_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(school_id))
+    target_dir = UPLOAD_ROOT / safe_school_id / upload_category
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    file_id = f"{uuid.uuid4().hex}{extension}"
+    target_path = target_dir / file_id
+    target_path.write_bytes(payload)
+
+    url = f"/uploads/{safe_school_id}/{upload_category}/{file_id}"
+    await log_security_event(
+        "file_uploaded",
+        current_user,
+        {
+            "category": upload_category,
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "size": len(payload),
+            "url": url,
+        }
+    )
+
+    return api_success(
+        {
+            "url": url,
+            "category": upload_category,
+            "content_type": file.content_type,
+            "size": len(payload),
+        },
+        message="File uploaded successfully"
+    )
 
 
 @api_router.patch("/school/profile")
