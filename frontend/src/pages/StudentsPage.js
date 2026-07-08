@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/App";
 import { toast } from "sonner";
 import { Plus, Search } from "lucide-react";
+import { uploadManagedFile } from "@/utils/uploads";
 
 const initialForm = {
   admission_number: "",
@@ -129,13 +130,16 @@ const StudentsPage = () => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const updateFileField = (field, file) => {
+  const updateFileField = async (field, file, category) => {
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => updateField(field, reader.result);
-    reader.onerror = () => toast.error("Unable to read selected file");
-    reader.readAsDataURL(file);
+    try {
+      const url = await uploadManagedFile(file, category);
+      updateField(field, url);
+      toast.success("File uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "File upload failed");
+    }
   };
 
   const toggleDocument = (name, checked) => {
@@ -207,7 +211,7 @@ const StudentsPage = () => {
                 </div>
                 <div>
                   <Label>Passport Photo</Label>
-                  <Input type="file" accept="image/*" onChange={(e) => updateFileField("passport_photo_url", e.target.files?.[0])} />
+                  <Input type="file" accept="image/*" onChange={(e) => updateFileField("passport_photo_url", e.target.files?.[0], "student_photo")} />
                   {formData.passport_photo_url && (
                     <img src={formData.passport_photo_url} alt="Passport preview" className="mt-2 h-20 w-20 rounded-lg object-cover border border-[#1E293B]" />
                   )}
@@ -257,7 +261,7 @@ const StudentsPage = () => {
                 </div>
                 <div>
                   <Label>Hospital Letter</Label>
-                  <Input type="file" accept="image/*,.pdf" onChange={(e) => updateFileField("hospital_letter_url", e.target.files?.[0])} />
+                  <Input type="file" accept="image/*,.pdf" onChange={(e) => updateFileField("hospital_letter_url", e.target.files?.[0], "medical_letter")} />
                   {formData.hospital_letter_url && (
                     <p className="text-xs text-emerald-400 mt-2">Hospital letter attached</p>
                   )}

@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Building2, Copy } from "lucide-react";
+import { uploadManagedFile } from "@/utils/uploads";
 
 const SchoolProfilePage = () => {
   const [loading, setLoading] = useState(true);
@@ -123,19 +124,21 @@ const SchoolProfilePage = () => {
   // =========================
   // LOGO UPLOAD
   // =========================
-  const handleLogoUpload = (e) => {
+  const handleLogoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setLogoPreview(reader.result);
+    try {
+      const url = await uploadManagedFile(file, "school_logo");
+      setLogoPreview(url);
       setFormData((prev) => ({
         ...prev,
-        logo_url: reader.result
+        logo_url: url
       }));
-    };
-    reader.readAsDataURL(file);
+      toast.success("Logo uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Logo upload failed");
+    }
   };
 
   const copyText = async (text, label) => {
