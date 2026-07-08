@@ -1454,6 +1454,16 @@ async def create_staff(
 
     await db.users.insert_one(user_doc)
     await db.staff.insert_one(staff_doc)
+    await log_security_event(
+        "staff_created",
+        current_user,
+        {
+            "staff_user_id": user_id,
+            "school_id": school_id,
+            "role": staff_role,
+            "employee_number": payload.employee_number,
+        }
+    )
 
     return api_success(
         {
@@ -1771,6 +1781,16 @@ async def approve_item(
     # FETCH UPDATED ITEM
     # =========================
     updated_item = await collection.find_one(query)
+    await log_security_event(
+        "approval_action",
+        current_user,
+        {
+            "item_type": item_type,
+            "item_id": item_id,
+            "approval_status": action,
+            "reason": payload.reason,
+        }
+    )
 
     # =========================
     # RESPONSE
@@ -2023,6 +2043,16 @@ async def register_school(payload: RegisterSchoolRequest):
             "updated_at": now
         }
         await db.platform_invoices.insert_one(invoice)
+        await log_security_event(
+            "school_registered",
+            admin,
+            {
+                "school_id": school_id,
+                "school_code": school_code,
+                "invoice_id": invoice["id"],
+                "approval_status": "pending",
+            }
+        )
 
         # =========================
         # TOKEN (FIXED STRUCTURE)
@@ -2220,6 +2250,15 @@ async def join_school(request: dict):
         }
 
         await db.users.insert_one(user)
+        await log_security_event(
+            "join_school_requested",
+            user,
+            {
+                "school_id": school_id,
+                "role": role,
+                "approval_status": "pending",
+            }
+        )
 
         # =========================
         # RESPONSE
@@ -2841,6 +2880,15 @@ async def create_student(
         # SAVE STUDENT
         # =========================
         await db.students.insert_one(student_data)
+        await log_security_event(
+            "student_created",
+            current_user,
+            {
+                "student_id": student_data["id"],
+                "admission_number": admission_number,
+                "approval_status": student_data["approval_status"],
+            }
+        )
 
         # =========================
         # FIX: CENTRAL APPROVAL SYSTEM ONLY
@@ -3415,6 +3463,16 @@ async def initiate_payment(
         # SAVE PAYMENT
         # =========================
         await db.payments.insert_one(payment)
+        await log_security_event(
+            "payment_recorded",
+            current_user,
+            {
+                "payment_id": payment["id"],
+                "student_id": request.student_id,
+                "amount": payment["amount"],
+                "approval_status": payment["approval_status"],
+            }
+        )
 
         # =========================
         # APPROVAL QUEUE SYNC
@@ -3588,6 +3646,16 @@ async def mark_attendance(
         # SAVE
         # =========================
         await db.attendance.insert_one(attendance)
+        await log_security_event(
+            "attendance_marked",
+            current_user,
+            {
+                "attendance_id": attendance["id"],
+                "entity_type": request.entity_type,
+                "entity_id": request.entity_id,
+                "approval_status": attendance["approval_status"],
+            }
+        )
 
         return {
             "success": True,
@@ -3785,6 +3853,16 @@ async def create_exam(
     }
 
     await db.exams.insert_one(exam)
+    await log_security_event(
+        "exam_created",
+        current_user,
+        {
+            "exam_id": exam["id"],
+            "class_name": exam.get("class_name"),
+            "term": exam.get("term"),
+            "academic_year": exam.get("academic_year"),
+        }
+    )
 
     return api_success(
         serialize_doc(exam),
@@ -4022,6 +4100,17 @@ async def record_result(
         )
 
         await db.results.insert_one(result_dict)
+        await log_security_event(
+            "result_recorded",
+            current_user,
+            {
+                "result_id": result_dict["id"],
+                "exam_id": request.exam_id,
+                "student_id": request.student_id,
+                "subject": request.subject,
+                "approval_status": result_dict["approval_status"],
+            }
+        )
 
         return {
             "message": "Result recorded",
@@ -4174,6 +4263,15 @@ async def create_announcement(
         }
 
         await db.announcements.insert_one(announcement)
+        await log_security_event(
+            "announcement_created",
+            current_user,
+            {
+                "announcement_id": announcement["id"],
+                "target_audience": announcement["target_audience"],
+                "approval_status": announcement["approval_status"],
+            }
+        )
 
         if announcement["approval_status"] == "pending":
             await db.approvals.insert_one({
@@ -4898,6 +4996,17 @@ async def create_transaction(
         }
 
         await db.finance_transactions.insert_one(txn)
+        await log_security_event(
+            "finance_transaction_recorded",
+            current_user,
+            {
+                "transaction_id": txn["id"],
+                "transaction_type": txn["transaction_type"],
+                "category": txn["category"],
+                "amount": txn["amount"],
+                "approval_status": txn["approval_status"],
+            }
+        )
 
         return {
             "success": True,

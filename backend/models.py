@@ -28,12 +28,17 @@ class ApprovalStatus(str, Enum):
 class SubscriptionStatus(str, Enum):
     INACTIVE = "inactive"
     ACTIVE = "active"
+    TRIAL = "trial"
+    EXPIRED = "expired"
     SUSPENDED = "suspended"
 
 
 class PaymentStatus(str, Enum):
     PENDING = "pending"
+    PAID = "paid"
+    APPROVED = "approved"
     COMPLETED = "completed"
+    OVERDUE = "overdue"
     FAILED = "failed"
 
 
@@ -41,6 +46,7 @@ class AttendanceStatus(str, Enum):
     PRESENT = "present"
     ABSENT = "absent"
     LATE = "late"
+    EXCUSED = "excused"
 
 
 class StudentStatus(str, Enum):
