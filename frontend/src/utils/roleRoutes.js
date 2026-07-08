@@ -17,7 +17,7 @@ const normalizeRole = (role) => {
 // CENTRAL ROLE ROUTE MAP
 // =========================
 const ROLE_ROUTES = {
-  super_admin: "/app/super-admin",
+  super_admin: "/app/dashboard",
   school_admin: "/app/dashboard",
   teacher: "/app/teacher-portal",
   finance: "/app/finance-portal",

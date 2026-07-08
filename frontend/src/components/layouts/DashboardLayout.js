@@ -22,8 +22,6 @@ import {
   Bell,
   User,
   FileText,
-  ShieldCheck,
-  Shield,
   Building2,
 } from "lucide-react";
 
@@ -70,12 +68,6 @@ const MENU_ITEMS = [
     label: "Dashboard",
     path: "/app/dashboard",
     roles: ["super_admin", "school_admin", "teacher", "finance", "secretary"],
-  },
-  {
-    icon: ShieldCheck,
-    label: "Super Admin",
-    path: "/app/super-admin",
-    roles: ["super_admin"],
   },
   {
     icon: Building2,

@@ -46,10 +46,6 @@ import TeacherPortal from "@/pages/TeacherPortal";
 import FinancePortal from "@/pages/FinancePortal";
 import SecretaryPortal from "@/pages/SecretaryPortal";
 
-// ======================
-// ADMIN
-// ======================
-import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import AnnouncementsPage from "@/pages/AnnouncementsPage";
 
 // ======================
@@ -94,7 +90,7 @@ export const normalizeRole = (role) => {
 export const getDefaultRouteByRole = (role) => {
   switch (normalizeRole(role)) {
     case "super_admin":
-      return "/app/super-admin";
+      return "/app/dashboard";
 
     case "teacher":
       return "/app/teacher-portal";
@@ -300,14 +296,6 @@ school_profile: ["super_admin", "school_admin"],
   "student-portal": [
     "super_admin",
     "student",
-  ],
-
-  // =========================
-  // SUPER ADMIN
-  // =========================
-
-  "super-admin": [
-    "super_admin",
   ],
 
 };
@@ -603,15 +591,6 @@ function App() {
                 }
               />
 
-              {/* SUPER ADMIN */}
-              <Route
-                path="super-admin"
-                element={
-                  <RoleProtectedRoute routeKey="super-admin">
-                    <SuperAdminDashboard />
-                  </RoleProtectedRoute>
-                }
-              />
               {/* SCHOOL PROFILE */}
               <Route
                 path="school-profile"

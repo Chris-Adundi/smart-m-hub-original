@@ -124,7 +124,7 @@ const getRedirectPath = (role) => {
       return "/app/secretary-portal";
 
     case "super_admin":
-      return "/app/super-admin";
+      return "/app/dashboard";
 
     case "school_admin":
     default:
