@@ -998,6 +998,11 @@ async def update_school_profile(
         {"id": school_id},
         {"$set": update_data}
     )
+    await log_security_event(
+        "school_profile_updated",
+        current_user,
+        {"fields": sorted(update_data.keys())}
+    )
 
     updated_school = await db.schools.find_one({"id": school_id})
 
@@ -2744,6 +2749,11 @@ async def update_school(
         await db.schools.update_one(
             {"id": school_id},
             {"$set": update_data}
+        )
+        await log_security_event(
+            "school_updated",
+            current_user,
+            {"school_id": school_id, "fields": sorted(update_data.keys())}
         )
 
         # =========================
@@ -4611,6 +4621,11 @@ async def request_admin_approval(
         await db.approval_requests.insert_one(
             approval_request
         )
+        await log_security_event(
+            "finance_approval_requested",
+            current_user,
+            {"request_id": approval_request["id"], "request_type": request_type}
+        )
 
         # =========================
         # RESPONSE
@@ -4858,6 +4873,18 @@ async def mpesa_callback(request: Request):
             "result_code": result_code,
             "raw": callback,
             "created_at": now_iso()
+        })
+        await db.audit_logs.insert_one({
+            "action": "mpesa_callback_received",
+            "performed_by": "mpesa_callback",
+            "user_id": None,
+            "school_id": None,
+            "metadata": {
+                "merchant_request_id": merchant_request_id,
+                "checkout_request_id": checkout_request_id,
+                "result_code": result_code,
+            },
+            "timestamp": now_iso()
         })
 
     return {"ResultCode": 0, "ResultDesc": "Success"}
@@ -5753,6 +5780,18 @@ async def progress_students(
                     "from": current_class,
                     "to": next_class
                 })
+
+        await log_security_event(
+            "student_progression_completed",
+            current_user,
+            {
+                "academic_year": request.academic_year,
+                "from_class": request.from_class,
+                "progressed": progressed,
+                "graduated": graduated,
+                "total_processed": progressed + graduated,
+            }
+        )
 
         return {
             "message": f"Progression complete for {request.academic_year}",

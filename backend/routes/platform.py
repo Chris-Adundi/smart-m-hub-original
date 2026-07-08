@@ -586,6 +586,7 @@ async def create_ticket(data: dict, user=Depends(require_super_admin)):
         "created_at": now_iso(),
     }
     await db.support_tickets.insert_one(ticket)
+    await log_action("platform_support_ticket_created", user, ticket.get("school_id"), {"ticket_id": ticket["id"], "priority": ticket["priority"]})
     return {"message": "Ticket created successfully", "ticket": serialize_doc(ticket)}
 
 
@@ -606,6 +607,7 @@ async def update_ticket(ticket_id: str, data: dict, user=Depends(require_super_a
     if push:
         operation["$push"] = push
     await db.support_tickets.update_one({"$or": [{"id": ticket_id}, {"_id": ObjectId(ticket_id) if ObjectId.is_valid(ticket_id) else ticket_id}]}, operation)
+    await log_action("platform_support_ticket_updated", user, metadata={"ticket_id": ticket_id, "fields": list(update.keys()), "appended": list(push.keys())})
     return {"message": "Ticket updated successfully"}
 
 
