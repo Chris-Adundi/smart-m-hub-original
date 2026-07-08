@@ -1,3 +1,4 @@
+import calendar
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
@@ -35,6 +36,93 @@ def money(value):
         return float(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def parse_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+
+def billing_due_date(today, billing_day):
+    try:
+        day = int(billing_day or today.day)
+    except (TypeError, ValueError):
+        day = today.day
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    return today.replace(day=max(1, min(day, last_day)))
+
+
+def invoice_number(school_code, billing_month):
+    code = (school_code or "SCHOOL").upper().replace(" ", "")
+    return f"SMH-SUB-{code}-{billing_month.replace('-', '')}"
+
+
+async def ensure_subscription_invoice(school, due_date):
+    school_id = str(school.get("id") or school.get("_id"))
+    billing_month = due_date.strftime("%Y-%m")
+    existing = await db.platform_invoices.find_one({
+        "school_id": school_id,
+        "invoice_type": "subscription",
+        "billing_month": billing_month,
+    })
+    if existing:
+        return existing, False
+
+    now = now_iso()
+    invoice = {
+        "id": str(ObjectId()),
+        "school_id": school_id,
+        "school_name": school.get("name"),
+        "school_code": school.get("school_code"),
+        "invoice_type": "subscription",
+        "invoice_number": invoice_number(school.get("school_code"), billing_month),
+        "billing_month": billing_month,
+        "amount": money(school.get("subscription_amount") or 2000),
+        "currency": "KES",
+        "status": "pending",
+        "due_date": due_date.isoformat(),
+        "description": "Monthly Smart M Hub subscription",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.platform_invoices.insert_one(invoice)
+    return invoice, True
+
+
+async def create_subscription_reminder(school, invoice, reminder_type, days_until_due):
+    school_id = str(school.get("id") or school.get("_id"))
+    billing_month = invoice.get("billing_month")
+    existing = await db.subscription_reminders.find_one({
+        "school_id": school_id,
+        "billing_month": billing_month,
+        "reminder_type": reminder_type,
+    })
+    if existing:
+        return False
+
+    await db.subscription_reminders.insert_one({
+        "id": str(ObjectId()),
+        "school_id": school_id,
+        "school_name": school.get("name"),
+        "school_code": school.get("school_code"),
+        "invoice_id": invoice.get("id"),
+        "invoice_number": invoice.get("invoice_number"),
+        "billing_month": billing_month,
+        "reminder_type": reminder_type,
+        "days_until_due": days_until_due,
+        "status": "pending",
+        "created_at": now_iso(),
+    })
+    return True
 
 
 async def require_super_admin(user=Depends(get_current_user)):
@@ -469,14 +557,113 @@ async def update_subscription(school_id: str, data: dict, user=Depends(require_s
     return {"message": "Subscription updated"}
 
 
+@router.patch("/invoices/{invoice_id}/mark-paid")
+async def mark_invoice_paid(invoice_id: str, data: dict = None, user=Depends(require_super_admin)):
+    invoice_filter = {"$or": [{"id": invoice_id}]}
+    if ObjectId.is_valid(invoice_id):
+        invoice_filter["$or"].append({"_id": ObjectId(invoice_id)})
+    invoice = await db.platform_invoices.find_one(invoice_filter)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    now = now_iso()
+    reference = (data or {}).get("reference")
+    await db.platform_invoices.update_one(
+        {"_id": invoice["_id"]},
+        {"$set": {
+            "status": "paid",
+            "paid_at": now,
+            "payment_reference": reference,
+            "updated_at": now,
+        }}
+    )
+
+    school_id = invoice.get("school_id")
+    if invoice.get("invoice_type") == "subscription" and school_id:
+        await db.schools.update_one(
+            school_lookup(str(school_id)),
+            {"$set": {
+                "subscription_status": "active",
+                "payment_status": "paid",
+                "status": "active",
+                "is_active": True,
+                "updated_at": now,
+            }}
+        )
+
+    await log_action("invoice_marked_paid", user, school_id, {"invoice_id": invoice_id, "reference": reference})
+    return {"message": "Invoice marked paid"}
+
+
 @router.post("/run-billing-check")
 async def billing_check(user=Depends(require_super_admin)):
-    result = await db.schools.update_many(
+    today = datetime.now(timezone.utc).date()
+    created_invoices = 0
+    reminders_created = 0
+    overdue_invoices = 0
+    expired_schools = 0
+
+    schools = await db.schools.find({
+        "approval_status": "approved",
+        "subscription_status": {"$in": ["active", "trial", "expired"]},
+    }).to_list(5000)
+
+    for school in schools:
+        school_id = str(school.get("id") or school.get("_id"))
+        due_date = parse_date(school.get("next_billing_date")) or billing_due_date(today, school.get("billing_day"))
+        days_until_due = (due_date - today).days
+
+        should_have_invoice = days_until_due <= 5 or str(school.get("subscription_status")).lower() == "expired"
+        if not should_have_invoice:
+            continue
+
+        invoice, created = await ensure_subscription_invoice(school, due_date)
+        if created:
+            created_invoices += 1
+
+        invoice_due_date = parse_date(invoice.get("due_date")) or due_date
+        invoice_status = str(invoice.get("status") or "pending").lower()
+        invoice_days_until_due = (invoice_due_date - today).days
+
+        if invoice_status == "pending" and 0 <= invoice_days_until_due <= 5:
+            reminder_type = "due_today" if invoice_days_until_due == 0 else "five_day"
+            if await create_subscription_reminder(school, invoice, reminder_type, invoice_days_until_due):
+                reminders_created += 1
+
+        if invoice_status in {"pending", "overdue"} and invoice_due_date < today:
+            if invoice_status != "overdue":
+                await db.platform_invoices.update_one(
+                    {"id": invoice.get("id")},
+                    {"$set": {"status": "overdue", "updated_at": now_iso()}}
+                )
+                overdue_invoices += 1
+            school_update = await db.schools.update_one(
+                school_lookup(school_id),
+                {"$set": {
+                    "subscription_status": "expired",
+                    "payment_status": "overdue",
+                    "status": "subscription_expired",
+                    "is_active": False,
+                    "updated_at": now_iso(),
+                }}
+            )
+            if school_update.modified_count:
+                expired_schools += 1
+
+    disabled_existing = await db.schools.update_many(
         {"subscription_status": "expired"},
         {"$set": {"is_active": False, "status": "subscription_expired", "updated_at": now_iso()}}
     )
-    await log_action("billing_check_completed", user, metadata={"disabled_schools": result.modified_count})
-    return {"message": "Billing check completed", "disabled_schools": result.modified_count}
+
+    summary = {
+        "created_invoices": created_invoices,
+        "reminders_created": reminders_created,
+        "overdue_invoices": overdue_invoices,
+        "expired_schools": expired_schools,
+        "disabled_schools": disabled_existing.modified_count,
+    }
+    await log_action("billing_check_completed", user, metadata=summary)
+    return {"message": "Billing check completed", **summary}
 
 
 @router.get("/audit-logs")
