@@ -1,12 +1,5 @@
 from fastapi import HTTPException
-
-# =========================
-# NORMALIZE ROLE (FIXED)
-# =========================
-def normalize_role(role: str) -> str:
-    if not role:
-        return ""
-    return str(role).strip().lower().replace(" ", "_")
+from auth import normalize_role
 
 
 # =========================

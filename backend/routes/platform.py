@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
 
-from auth import get_current_user, db, hash_password
+from auth import get_current_user, db, hash_password, validate_password_strength
 
 
 router = APIRouter(prefix="/api/platform", tags=["Platform Admin"])
@@ -290,7 +290,10 @@ async def reset_school_admin_password(school_id: str, data: dict, user=Depends(r
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
-    password = data.get("password") or "SmartMHub123"
+    password = str(data.get("password") or "").strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="A new password is required")
+    validate_password_strength(password)
     result = await db.users.update_one(
         {"school_id": canonical_id, "role": "school_admin"},
         {"$set": {"password_hash": hash_password(password), "temporary_password": password, "updated_at": now_iso()}}

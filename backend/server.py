@@ -55,7 +55,13 @@ from auth import (
     decode_token,
     get_current_user,
     require_roles,
-    login_user
+    login_user,
+    normalize_role as canonical_normalize_role,
+    validate_password_strength,
+    assert_login_not_locked,
+    record_login_failure,
+    clear_login_failures,
+    log_security_event,
 )
 
 # =====================================================
@@ -202,73 +208,7 @@ def ensure_id(doc: dict) -> dict:
 # ROLE NORMALIZATION
 # =====================================================
 def normalize_role(role: str) -> str:
-    """
-    Centralized role normalization.
-    Prevents frontend/backend role mismatch.
-    """
-
-    if not role:
-        return ""
-
-    role = (
-        str(role)
-        .lower()
-        .strip()
-    )
-
-    role_map = {
-
-        # =========================
-        # ADMINS
-        # =========================
-        "admin": "school_admin",
-        "administrator": "school_admin",
-        "principal": "school_admin",
-        "headteacher": "school_admin",
-        "schooladmin": "school_admin",
-
-        # =========================
-        # FINANCE
-        # =========================
-        "finance officer": "finance",
-        "finance_officer": "finance",
-        "accountant": "finance",
-        "bursar": "finance",
-
-        # =========================
-        # TEACHERS
-        # =========================
-        "class teacher": "teacher",
-        "subject teacher": "teacher",
-
-        # =========================
-        # SECRETARY
-        # =========================
-        "office secretary": "secretary",
-
-        # =========================
-        # PARENT
-        # =========================
-        "guardian": "parent",
-
-        # =========================
-        # DIRECT
-        # =========================
-        "teacher": "teacher",
-        "finance": "finance",
-        "secretary": "secretary",
-        "student": "student",
-        "parent": "parent",
-        "school_admin": "school_admin",
-        "super_admin": "super_admin",
-    }
-
-    normalized = role_map.get(role, role)
-
-    if normalized not in VALID_SYSTEM_ROLES:
-        return ""
-
-    return normalized
+    return canonical_normalize_role(role)
 
 
 # =====================================================
@@ -1370,6 +1310,8 @@ async def create_staff(
             detail="Staff role must be teacher, finance, or secretary"
         )
 
+    validate_password_strength(payload.password)
+
     email = payload.email.lower().strip()
 
     existing = await db.users.find_one({
@@ -1859,7 +1801,11 @@ async def register_school(payload: RegisterSchoolRequest):
                 detail="operation_type must be day, boarding, or mixed"
             )
 
-        temporary_password = payload.admin_password or generate_temporary_password()
+        if payload.admin_password:
+            validate_password_strength(payload.admin_password)
+            temporary_password = payload.admin_password
+        else:
+            temporary_password = generate_temporary_password()
         billing_day = now.day
 
         # =========================
@@ -2090,6 +2036,8 @@ async def join_school(request: dict):
                 detail="Email, password, and full name are required"
             )
 
+        validate_password_strength(password)
+
         # =========================
         # ROLE VALIDATION
         # =========================
@@ -2221,6 +2169,8 @@ async def login(request: LoginRequest):
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email and password required")
 
+        await assert_login_not_locked(email, school_code)
+
         user_query = {"email": email}
         login_school = None
 
@@ -2235,7 +2185,8 @@ async def login(request: LoginRequest):
         user = await db.users.find_one(user_query)
 
         if not user:
-
+            await record_login_failure(email, school_code, "user_not_found")
+            await log_security_event("login_failed", metadata={"email": email, "school_code": school_code, "reason": "user_not_found"})
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         user_id = user.get("id") or str(user.get("_id"))
@@ -2243,19 +2194,27 @@ async def login(request: LoginRequest):
         stored_hash = user.get("password_hash") or user.get("hashed_password")
 
         if not stored_hash or not verify_password(password, stored_hash):
+            await record_login_failure(email, school_code, "invalid_password")
+            await log_security_event("login_failed", user, {"email": email, "school_code": school_code, "reason": "invalid_password"})
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         db_role = normalize_role(user.get("role") or "")
 
         if user.get("is_active") is False:
+            await record_login_failure(email, school_code, "account_disabled")
+            await log_security_event("login_blocked", user, {"reason": "account_disabled"})
             raise HTTPException(status_code=403, detail="Account disabled")
 
         if user.get("is_suspended") is True:
+            await record_login_failure(email, school_code, "account_suspended")
+            await log_security_event("login_blocked", user, {"reason": "account_suspended"})
             raise HTTPException(status_code=403, detail="Account suspended")
 
         approval_status = (user.get("approval_status") or "pending").lower()
 
         if approval_status != "approved":
+            await record_login_failure(email, school_code, "account_not_approved")
+            await log_security_event("login_blocked", user, {"reason": "account_not_approved"})
             raise HTTPException(status_code=403, detail="Account not approved")
 
         school_id = user.get("school_id")
@@ -2270,18 +2229,28 @@ async def login(request: LoginRequest):
                 school_status = str(school.get("status") or "").lower()
 
                 if school_approval != "approved":
+                    await record_login_failure(email, school_code, "school_not_approved")
+                    await log_security_event("login_blocked", user, {"reason": "school_not_approved", "school_id": school_id})
                     raise HTTPException(status_code=403, detail="School is pending platform approval")
 
                 if school.get("is_active") is False or school_status in {"suspended", "inactive", "pending_approval"}:
+                    await record_login_failure(email, school_code, "school_disabled")
+                    await log_security_event("login_blocked", user, {"reason": "school_disabled", "school_id": school_id})
                     raise HTTPException(status_code=403, detail="School access is disabled")
 
                 if school_subscription in {"expired", "suspended", "inactive"}:
+                    await record_login_failure(email, school_code, "subscription_inactive")
+                    await log_security_event("login_blocked", user, {"reason": "subscription_inactive", "school_id": school_id})
                     raise HTTPException(status_code=403, detail="School subscription is not active")
+
+        await clear_login_failures(email, school_code)
 
         await db.users.update_one(
             {"id": user_id},
             {"$set": {"last_login": now_iso(), "updated_at": now_iso()}}
         )
+
+        await log_security_event("login_success", user, {"school_id": school_id, "role": db_role})
 
         token = create_access_token({
             "user_id": user_id,
@@ -3737,7 +3706,7 @@ async def create_exam(
 
 # OLD LOGIN - DISABLED
 # @api_router.post("/auth/login")
-async def login_legacy(request: LoginRequest):
+async def _disabled_legacy_login_v1(request: LoginRequest):
     try:
         email = (request.email or "").strip().lower()
 
@@ -3799,7 +3768,7 @@ async def login_legacy(request: LoginRequest):
 # =========================
 # GET EXAMS (FIXED VERSION)
 # =========================
-async def login_legacy(request: LoginRequest):
+async def _disabled_legacy_login_v2(request: LoginRequest):
     try:
         email = (request.email or "").strip().lower()
         password = (request.password or "").strip()

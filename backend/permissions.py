@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from auth import normalize_role
 
 
 # =========================
@@ -49,15 +50,6 @@ ROLE_PERMISSIONS = {
         "attendance:read"
     ]
 }
-
-
-# =========================
-# NORMALIZE ROLE (FIXED SAFETY)
-# =========================
-def normalize_role(role: str) -> str:
-    if not role:
-        return ""
-    return str(role).strip().lower().replace(" ", "_")
 
 
 # =========================
