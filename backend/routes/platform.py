@@ -540,6 +540,16 @@ async def platform_control(user=Depends(require_super_admin)):
 @router.patch("/platform-control")
 async def update_platform_control(data: dict, user=Depends(require_super_admin)):
     await db.platform_settings.update_one({}, {"$set": {**data, "updated_at": now_iso()}}, upsert=True)
+    announcement = str(data.get("latest_announcement") or "").strip()
+    if announcement:
+        await db.global_announcements.insert_one({
+            "id": str(ObjectId()),
+            "title": data.get("announcement_title") or "Platform Announcement",
+            "message": announcement,
+            "status": "active",
+            "created_by": user.get("user_id"),
+            "created_at": now_iso(),
+        })
     await log_action("platform_settings_updated", user)
     return {"message": "Platform settings updated"}
 

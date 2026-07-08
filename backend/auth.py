@@ -260,6 +260,10 @@ async def get_current_user(
             detail="Role mismatch"
         )
 
+    platform_settings = await db.platform_settings.find_one({}, {"_id": 0}) or {}
+    if platform_settings.get("maintenance_mode") is True and db_role != "super_admin":
+        raise HTTPException(status_code=503, detail="Platform is in maintenance mode")
+
     # =========================
     # FIX #2: SCHOOL ISOLATION SAFETY
     # =========================

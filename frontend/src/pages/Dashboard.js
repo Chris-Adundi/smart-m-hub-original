@@ -114,6 +114,7 @@ const Dashboard = () => {
   const [approvalLoading, setApprovalLoading] =
     useState(false);
   const [schoolIdentity, setSchoolIdentity] = useState(null);
+  const [globalAnnouncements, setGlobalAnnouncements] = useState([]);
 
   // =========================
 // SAFE USER
@@ -200,6 +201,14 @@ const isStudent =
           );
 
           setStats(defaultStats);
+        }
+
+        try {
+          const announcementsRes = await apiClient.get("/platform-announcements");
+          const data = announcementsRes?.data;
+          setGlobalAnnouncements(Array.isArray(data) ? data : data?.announcements || []);
+        } catch {
+          setGlobalAnnouncements([]);
         }
 
         // =========================
@@ -503,6 +512,19 @@ const isStudent =
         </p>
 
       </div>
+
+      {globalAnnouncements.length > 0 && (
+        <div className="space-y-3">
+          {globalAnnouncements.map((announcement) => (
+            <Card key={announcement.id} className="border-amber-500/30 bg-amber-500/10">
+              <CardContent className="p-4">
+                <p className="text-amber-200 font-semibold">{announcement.title || "Platform Announcement"}</p>
+                <p className="text-amber-100/90 text-sm mt-1">{announcement.message}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {isSchoolAdmin && schoolIdentity && (
         <Card

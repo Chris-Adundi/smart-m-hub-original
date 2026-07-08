@@ -5169,6 +5169,19 @@ async def update_school_support_ticket(
     return {"success": True, "message": "Support ticket updated"}
 
 
+@api_router.get("/platform-announcements")
+async def get_platform_announcements(current_user: dict = Depends(get_current_user)):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    announcements = await db.global_announcements.find(
+        {"status": "active"},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(10).to_list(10)
+    return announcements
+
+
 @api_router.get("/timetable")
 async def get_timetable(current_user: dict = Depends(get_current_user)):
     school_id = current_user.get("school_id")
