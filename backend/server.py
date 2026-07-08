@@ -3682,6 +3682,30 @@ async def mark_attendance(
         # SAVE
         # =========================
         await db.attendance.insert_one(attendance)
+        status_value = request.status.value if hasattr(request.status, "value") else str(request.status)
+        attendance_day = attendance_date.date().isoformat()
+        attendance_week = f"{attendance_date.isocalendar().year}-W{attendance_date.isocalendar().week:02d}"
+        await db.attendance_summaries.update_one(
+            {
+                "school_id": school_id,
+                "entity_type": entity_type,
+                "entity_id": request.entity_id,
+                "date": attendance_day,
+                "status": status_value,
+            },
+            {
+                "$inc": {"count": 1},
+                "$set": {
+                    "week": attendance_week,
+                    "updated_at": now_iso(),
+                },
+                "$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "created_at": now_iso(),
+                }
+            },
+            upsert=True
+        )
         await log_security_event(
             "attendance_marked",
             current_user,
@@ -3709,6 +3733,51 @@ async def mark_attendance(
             status_code=500,
             detail="Internal server error"
         )
+
+
+@api_router.get("/attendance/summary")
+async def get_attendance_summary(
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher", "secretary", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    pipeline = [
+        {"$match": {"school_id": school_id}},
+        {"$group": {
+            "_id": {"week": "$week", "status": "$status"},
+            "count": {"$sum": "$count"}
+        }},
+        {"$sort": {"_id.week": -1}},
+        {"$limit": 60},
+    ]
+    weekly = await db.attendance_summaries.aggregate(pipeline).to_list(100)
+    totals_pipeline = [
+        {"$match": {"school_id": school_id}},
+        {"$group": {"_id": "$status", "count": {"$sum": "$count"}}},
+    ]
+    totals = await db.attendance_summaries.aggregate(totals_pipeline).to_list(20)
+
+    return {
+        "totals": {str(row["_id"]): row["count"] for row in totals},
+        "weekly": [
+            {
+                "week": row["_id"]["week"],
+                "status": row["_id"]["status"],
+                "count": row["count"],
+            }
+            for row in weekly
+        ],
+        "retention_policy": {
+            "detail_window_weeks": 15,
+            "summary_retention": "permanent"
+        }
+    }
 
 
 @api_router.get("/attendance")
@@ -5677,6 +5746,7 @@ async def ensure_database_indexes():
         (db.staff, [("school_id", 1), ("employee_number", 1)], {"name": "staff_school_employee_idx"}),
         (db.payments, [("school_id", 1), ("created_at", -1)], {"name": "payments_school_created_idx"}),
         (db.attendance, [("school_id", 1), ("date", -1)], {"name": "attendance_school_date_idx"}),
+        (db.attendance_summaries, [("school_id", 1), ("week", -1), ("status", 1)], {"name": "attendance_summary_school_week_status_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),

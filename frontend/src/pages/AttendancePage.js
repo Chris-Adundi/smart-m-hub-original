@@ -25,6 +25,7 @@ import { Plus, Calendar } from "lucide-react";
 const AttendancePage = () => {
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState([]);
+  const [summary, setSummary] = useState({ totals: {}, weekly: [] });
   const [selectedDate, setSelectedDate] = useState(
     new Date().toISOString().split("T")[0]
   );
@@ -80,6 +81,15 @@ const AttendancePage = () => {
     }
   }, [selectedDate]);
 
+  const fetchSummary = useCallback(async () => {
+    try {
+      const response = await apiClient.get("/attendance/summary");
+      setSummary(response?.data || { totals: {}, weekly: [] });
+    } catch {
+      setSummary({ totals: {}, weekly: [] });
+    }
+  }, []);
+
   // ----------------------------
   // FIX: EFFECT DEPENDENCIES
   // ----------------------------
@@ -91,6 +101,10 @@ const AttendancePage = () => {
   useEffect(() => {
     fetchAttendance();
   }, [fetchAttendance]);
+
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
 
   // ----------------------------
   // FORM SUBMIT
@@ -114,6 +128,7 @@ const AttendancePage = () => {
       });
 
       fetchAttendance();
+      fetchSummary();
     } catch (error) {
       toast.error(
         error?.response?.data?.detail ||
@@ -318,6 +333,25 @@ const AttendancePage = () => {
         </Card>
 
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Attendance Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            {["present", "absent", "late", "excused"].map((status) => (
+              <div key={status} className="rounded-lg border p-3">
+                <p className="text-sm text-slate-600 capitalize">{status}</p>
+                <p className="text-xl font-bold">{Number(summary?.totals?.[status] || 0).toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-slate-500">
+            Detailed daily records are shown by date; permanent weekly summaries remain available for reporting.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* RECORDS */}
       <Card>
