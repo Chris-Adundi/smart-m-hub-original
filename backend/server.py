@@ -669,6 +669,8 @@ class CreateAnnouncementRequest(BaseModel):
     target_audience: str = "all"
 
     target_class: Optional[str] = None
+    target_student_ids: Optional[List[str]] = None
+    target_staff_user_ids: Optional[List[str]] = None
 
     priority: str = "normal"
 
@@ -4249,6 +4251,28 @@ async def get_announcements(
             -1
         ).to_list(length=1000)
 
+        if not can_view_all:
+            user_id = current_user.get("user_id") or current_user.get("id")
+            student_id = current_user.get("student_id")
+            admission_number = current_user.get("admission_number")
+            filtered = []
+            for announcement in announcements:
+                audience = str(announcement.get("target_audience") or "all").lower()
+                student_targets = [str(v) for v in announcement.get("target_student_ids") or []]
+                staff_targets = [str(v) for v in announcement.get("target_staff_user_ids") or []]
+                if audience == "all":
+                    filtered.append(announcement)
+                elif role == "student" and audience in ["students", "specific_students"]:
+                    if audience == "students" or str(student_id) in student_targets or str(admission_number) in student_targets:
+                        filtered.append(announcement)
+                elif role == "parent" and audience in ["parents", "specific_students"]:
+                    if audience == "parents" or str(student_id) in student_targets or str(admission_number) in student_targets:
+                        filtered.append(announcement)
+                elif role in ["teacher", "finance", "secretary"] and audience in ["staff", "specific_staff"]:
+                    if audience == "staff" or str(user_id) in staff_targets:
+                        filtered.append(announcement)
+            announcements = filtered
+
         return announcements
 
     except HTTPException:
@@ -4275,6 +4299,19 @@ async def create_announcement(
         if role not in ["school_admin", "secretary", "teacher", "finance", "super_admin"]:
             raise HTTPException(status_code=403, detail="Unauthorized")
 
+        allowed_audiences = {
+            "all",
+            "students",
+            "parents",
+            "staff",
+            "class",
+            "specific_students",
+            "specific_staff",
+        }
+        target_audience = str(request.target_audience or "all").lower().strip()
+        if target_audience not in allowed_audiences:
+            raise HTTPException(status_code=400, detail="Invalid target audience")
+
         auto_approve = role in ["school_admin", "super_admin"]
         user_id = current_user.get("user_id")
         now = now_utc()
@@ -4284,8 +4321,10 @@ async def create_announcement(
             "school_id": school_id,
             "title": request.title,
             "content": request.content,
-            "target_audience": request.target_audience,
+            "target_audience": target_audience,
             "target_class": request.target_class,
+            "target_student_ids": [str(v).strip() for v in (request.target_student_ids or []) if str(v).strip()],
+            "target_staff_user_ids": [str(v).strip() for v in (request.target_staff_user_ids or []) if str(v).strip()],
             "priority": request.priority or "normal",
             "created_by": user_id,
             "submitted_by": user_id,
@@ -4943,7 +4982,13 @@ async def get_my_portal_data(
         for announcement in announcements:
             audience = str(announcement.get("target_audience") or "all").lower()
             target_class = announcement.get("target_class")
+            student_targets = [str(v) for v in announcement.get("target_student_ids") or []]
             if audience in ["all", "students", "parents"]:
+                visible_announcements.append(announcement)
+            elif audience == "specific_students" and (
+                str(student.get("id")) in student_targets or
+                str(student.get("admission_number")) in student_targets
+            ):
                 visible_announcements.append(announcement)
             elif target_class and target_class == student.get("class_name"):
                 visible_announcements.append(announcement)

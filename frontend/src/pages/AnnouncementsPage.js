@@ -21,6 +21,8 @@ const AnnouncementsPage = () => {
     content: "",
     target_audience: "all",
     target_class: "",
+    target_student_ids_text: "",
+    target_staff_user_ids_text: "",
     priority: "normal"
   });
 
@@ -48,7 +50,15 @@ const AnnouncementsPage = () => {
     e.preventDefault();
 
     try {
-      const res = await apiClient.post("/announcements", form);
+      const payload = {
+        ...form,
+        target_student_ids: splitTargets(form.target_student_ids_text),
+        target_staff_user_ids: splitTargets(form.target_staff_user_ids_text),
+      };
+      delete payload.target_student_ids_text;
+      delete payload.target_staff_user_ids_text;
+
+      const res = await apiClient.post("/announcements", payload);
 
       toast.success(
         (res?.data?.approval_status || res?.data?.data?.approval_status) === "pending"
@@ -62,6 +72,8 @@ const AnnouncementsPage = () => {
         content: "",
         target_audience: "all",
         target_class: "",
+        target_student_ids_text: "",
+        target_staff_user_ids_text: "",
         priority: "normal"
       });
 
@@ -70,6 +82,8 @@ const AnnouncementsPage = () => {
       toast.error(err.response?.data?.detail || "Failed to submit");
     }
   };
+
+  const splitTargets = (value) => String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
 
   const getPriorityIcon = (p) => {
     if (p === "urgent") return <AlertTriangle className="w-4 h-4 text-red-500" />;
@@ -142,6 +156,9 @@ const AnnouncementsPage = () => {
                     <SelectItem value="students">Students</SelectItem>
                     <SelectItem value="parents">Parents</SelectItem>
                     <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="class">Specific Class</SelectItem>
+                    <SelectItem value="specific_students">Specific Students</SelectItem>
+                    <SelectItem value="specific_staff">Specific Staff</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -160,6 +177,39 @@ const AnnouncementsPage = () => {
                 </Select>
 
               </div>
+
+              {form.target_audience === "class" && (
+                <div>
+                  <Label>Class</Label>
+                  <Input
+                    placeholder="Example: Grade 4"
+                    value={form.target_class}
+                    onChange={(e) => setForm({ ...form, target_class: e.target.value })}
+                  />
+                </div>
+              )}
+
+              {form.target_audience === "specific_students" && (
+                <div>
+                  <Label>Student IDs or Admission Numbers</Label>
+                  <Input
+                    placeholder="Comma separated"
+                    value={form.target_student_ids_text}
+                    onChange={(e) => setForm({ ...form, target_student_ids_text: e.target.value })}
+                  />
+                </div>
+              )}
+
+              {form.target_audience === "specific_staff" && (
+                <div>
+                  <Label>Staff User IDs</Label>
+                  <Input
+                    placeholder="Comma separated"
+                    value={form.target_staff_user_ids_text}
+                    onChange={(e) => setForm({ ...form, target_staff_user_ids_text: e.target.value })}
+                  />
+                </div>
+              )}
 
               <Button type="submit" className="w-full">
                 Submit for Approval
@@ -244,6 +294,18 @@ const AnnouncementsPage = () => {
                   {a.target_class && (
                     <Badge className="bg-white/5 text-slate-300">
                       {a.target_class}
+                    </Badge>
+                  )}
+
+                  {(a.target_student_ids || []).length > 0 && (
+                    <Badge className="bg-white/5 text-slate-300">
+                      {(a.target_student_ids || []).length} students
+                    </Badge>
+                  )}
+
+                  {(a.target_staff_user_ids || []).length > 0 && (
+                    <Badge className="bg-white/5 text-slate-300">
+                      {(a.target_staff_user_ids || []).length} staff
                     </Badge>
                   )}
 
