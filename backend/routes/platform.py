@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime, timezone
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
 
@@ -7,6 +8,8 @@ from auth import get_current_user, db, hash_password, validate_password_strength
 
 
 router = APIRouter(prefix="/api/platform", tags=["Platform Admin"])
+APP_STARTED_AT = datetime.now(timezone.utc)
+UPLOAD_ROOT = Path(__file__).resolve().parents[1] / "uploads"
 
 
 def now_iso():
@@ -36,6 +39,36 @@ def money(value):
         return float(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def uptime_label():
+    seconds = int((datetime.now(timezone.utc) - APP_STARTED_AT).total_seconds())
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def upload_storage_usage():
+    total_bytes = 0
+    total_files = 0
+    if not UPLOAD_ROOT.exists():
+        return {"used_mb": 0, "files": 0}
+    for path in UPLOAD_ROOT.rglob("*"):
+        if path.is_file():
+            total_files += 1
+            total_bytes += path.stat().st_size
+    return {"used_mb": round(total_bytes / (1024 * 1024), 2), "files": total_files}
+
+
+def is_today(value, today):
+    if isinstance(value, datetime):
+        return value.date().isoformat() == today
+    return str(value or "").startswith(today)
 
 
 def parse_date(value):
@@ -201,6 +234,7 @@ async def get_platform_metrics(user=Depends(require_super_admin)):
     payments = await db.payments.find({}).to_list(10000)
     invoices = await db.platform_invoices.find({}).to_list(5000)
     tickets = await db.support_tickets.find({}).to_list(5000)
+    audit_logs = await db.audit_logs.find({}, {"_id": 0, "action": 1, "timestamp": 1}).sort("timestamp", -1).limit(10000).to_list(10000)
 
     paid_revenue = sum(money(p.get("amount")) for p in payments if p.get("status") in {"paid", "completed", "approved"})
     invoice_revenue = sum(money(i.get("amount")) for i in invoices if i.get("status") == "paid")
@@ -224,24 +258,48 @@ async def get_platform_metrics(user=Depends(require_super_admin)):
         "daily_login_statistics": sum(1 for u in users if str(u.get("last_login", "")).startswith(today)),
         "total_users": len(users),
         "total_revenue": paid_revenue + invoice_revenue,
+        "storage_usage": upload_storage_usage(),
+        "api_activity_today": sum(1 for log in audit_logs if is_today(log.get("timestamp"), today)),
+        "failed_logins_today": sum(1 for log in audit_logs if log.get("action") == "login_failed" and is_today(log.get("timestamp"), today)),
+        "overdue_invoices": sum(1 for i in invoices if i.get("status") == "overdue"),
     }
 
 
 @router.get("/system-health")
 async def system_health(user=Depends(require_super_admin)):
-    errors = await db.audit_logs.find({"action": {"$regex": "error", "$options": "i"}}, {"_id": 0}).sort("timestamp", -1).limit(20).to_list(20)
+    database_status = "connected"
+    try:
+        await db.command("ping")
+    except Exception as exc:
+        database_status = f"error: {str(exc)}"
+
+    collections = {}
+    for name in ["schools", "users", "students", "payments", "platform_invoices", "support_tickets", "audit_logs"]:
+        try:
+            collections[name] = await db[name].count_documents({})
+        except Exception:
+            collections[name] = None
+
+    errors = await db.audit_logs.find({"action": {"$regex": "error|failed|blocked", "$options": "i"}}, {"_id": 0}).sort("timestamp", -1).limit(20).to_list(20)
     alerts = await system_alerts(user)
+    pending_jobs = await db.subscription_reminders.count_documents({"status": "pending"})
+    maintenance = await db.platform_settings.find_one({}, {"_id": 0}) or {}
     return {
-        "database_status": "connected",
+        "database_status": database_status,
         "api_status": "ok",
         "authentication_status": "ok",
         "server_status": "running",
-        "platform_status": "operational",
-        "background_jobs": "ready",
+        "platform_status": "maintenance" if maintenance.get("maintenance_mode") else "operational",
+        "background_jobs": {"pending_subscription_reminders": pending_jobs},
         "latest_errors": errors,
         "alerts": alerts,
         "system_version": "1.0.0",
-        "uptime": "online",
+        "uptime": uptime_label(),
+        "started_at": APP_STARTED_AT.isoformat(),
+        "collections": collections,
+        "storage_usage": upload_storage_usage(),
+        "audit_events": await db.audit_logs.count_documents({}),
+        "open_support_tickets": await db.support_tickets.count_documents({"status": {"$in": ["open", None]}}),
         "timestamp": now_iso(),
     }
 
@@ -435,23 +493,58 @@ async def analytics(user=Depends(require_super_admin)):
     students = await db.students.find({}, {"_id": 0}).to_list(10000)
     users = await db.users.find({}, {"_id": 0}).to_list(10000)
     payments = await db.payments.find({}, {"_id": 0}).to_list(10000)
+    invoices = await db.platform_invoices.find({}, {"_id": 0}).to_list(10000)
+    attendance = await db.attendance_summaries.find({}, {"_id": 0}).to_list(10000)
+    audit_logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(10000).to_list(10000)
+    support_tickets = await db.support_tickets.find({}, {"_id": 0}).to_list(5000)
+
+    school_activity = []
+    for school in schools:
+        school_id = school.get("id")
+        school_activity.append({
+            "id": school_id,
+            "name": school.get("name"),
+            "users": sum(1 for u in users if u.get("school_id") == school_id),
+            "students": sum(1 for s in students if s.get("school_id") == school_id),
+            "payments": sum(1 for p in payments if p.get("school_id") == school_id),
+            "support_tickets": sum(1 for t in support_tickets if t.get("school_id") == school_id),
+            "last_login": max([u.get("last_login") for u in users if u.get("school_id") == school_id and u.get("last_login")] or [None]),
+        })
+
     return {
-        "revenue": monthly_buckets(payments),
+        "revenue": monthly_buckets(payments + invoices),
         "school_growth": monthly_count(schools),
         "student_growth": monthly_count(students),
         "user_growth": monthly_count(users),
         "monthly_registrations": monthly_count(schools),
-        "system_usage": {"users": len(users), "students": len(students), "schools": len(schools)},
-        "most_active_schools": sorted(
-            [{"name": s.get("name"), "active_users": s.get("active_users_count", 0)} for s in schools],
-            key=lambda x: x["active_users"],
-            reverse=True
-        )[:10],
+        "payment_growth": monthly_count(payments),
+        "invoice_growth": monthly_count(invoices),
+        "attendance_summary": monthly_buckets([{"created_at": a.get("date"), "amount": a.get("count")} for a in attendance]),
+        "audit_activity": monthly_count(audit_logs),
+        "support_activity": monthly_count(support_tickets),
+        "system_usage": {
+            "users": len(users),
+            "students": len(students),
+            "schools": len(schools),
+            "payments": len(payments),
+            "invoices": len(invoices),
+            "support_tickets": len(support_tickets),
+            "audit_events": len(audit_logs),
+            "storage": upload_storage_usage(),
+        },
+        "most_active_schools": sorted(school_activity, key=lambda x: (x["users"] + x["students"] + x["payments"] + x["support_tickets"]), reverse=True)[:10],
         "most_active_users": sorted(
-            [{"name": u.get("full_name"), "email": u.get("email"), "last_login": u.get("last_login")} for u in users],
+            [{"name": u.get("full_name"), "email": u.get("email"), "role": u.get("role"), "school_id": u.get("school_id"), "last_login": u.get("last_login")} for u in users],
             key=lambda x: str(x.get("last_login") or ""),
             reverse=True
         )[:10],
+        "status_breakdowns": {
+            "schools": status_breakdown(schools, "status"),
+            "subscriptions": status_breakdown(schools, "subscription_status"),
+            "payments": status_breakdown(payments, "status"),
+            "invoices": status_breakdown(invoices, "status"),
+            "support": status_breakdown(support_tickets, "status"),
+        },
     }
 
 
@@ -461,6 +554,14 @@ def monthly_count(records):
         key = str(record.get("created_at") or "")[:7] or "unknown"
         buckets[key] = buckets.get(key, 0) + 1
     return [{"month": key, "count": value} for key, value in sorted(buckets.items())]
+
+
+def status_breakdown(records, key):
+    buckets = {}
+    for record in records:
+        status_value = str(record.get(key) or "unknown").lower()
+        buckets[status_value] = buckets.get(status_value, 0) + 1
+    return [{"status": key, "count": value} for key, value in sorted(buckets.items())]
 
 
 @router.get("/support-tickets")
