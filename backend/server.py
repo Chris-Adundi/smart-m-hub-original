@@ -2639,6 +2639,13 @@ async def login(request: LoginRequest):
 
         db_role = normalize_role(user.get("role") or "")
 
+        approval_status = (user.get("approval_status") or "pending").lower()
+
+        if approval_status != "approved":
+            await record_login_failure(email, school_code, "account_not_approved")
+            await log_security_event("login_blocked", user, {"reason": "account_not_approved"})
+            raise HTTPException(status_code=403, detail="Account pending approval")
+
         if user.get("is_active") is False:
             await record_login_failure(email, school_code, "account_disabled")
             await log_security_event("login_blocked", user, {"reason": "account_disabled"})
@@ -2648,13 +2655,6 @@ async def login(request: LoginRequest):
             await record_login_failure(email, school_code, "account_suspended")
             await log_security_event("login_blocked", user, {"reason": "account_suspended"})
             raise HTTPException(status_code=403, detail="Account suspended")
-
-        approval_status = (user.get("approval_status") or "pending").lower()
-
-        if approval_status != "approved":
-            await record_login_failure(email, school_code, "account_not_approved")
-            await log_security_event("login_blocked", user, {"reason": "account_not_approved"})
-            raise HTTPException(status_code=403, detail="Account not approved")
 
         school_id = user.get("school_id")
 
