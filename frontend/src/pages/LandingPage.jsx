@@ -34,7 +34,7 @@ const whySmartMHub = [
   "Improved communication",
   "Better financial accountability",
   "Reduced paperwork",
-  "Real-time data for better decisions",
+  "Better decision-making through real-time data",
 ];
 
 export default function LandingPage() {
@@ -89,20 +89,6 @@ export default function LandingPage() {
         </section>
 
         <section className="mx-auto max-w-7xl px-6 py-16">
-          <div className="grid md:grid-cols-4 gap-4">
-            {features.map(([title, text, Icon]) => (
-              <Card key={title} className="bg-[#101827] border-white/10">
-                <CardContent className="p-5">
-                  <Icon className="h-6 w-6 text-emerald-300" />
-                  <h2 className="mt-4 font-semibold text-white">{title}</h2>
-                  <p className="mt-2 text-sm text-slate-400">{text}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-7xl px-6 pb-16">
           <div className="rounded-lg border border-white/10 bg-[#0B1220] p-6 md:p-8">
             <div className="grid lg:grid-cols-[0.8fr_1.2fr] gap-8 items-start">
               <div>
@@ -122,6 +108,20 @@ export default function LandingPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-6 pb-16">
+          <div className="grid md:grid-cols-4 gap-4">
+            {features.map(([title, text, Icon]) => (
+              <Card key={title} className="bg-[#101827] border-white/10">
+                <CardContent className="p-5">
+                  <Icon className="h-6 w-6 text-emerald-300" />
+                  <h2 className="mt-4 font-semibold text-white">{title}</h2>
+                  <p className="mt-2 text-sm text-slate-400">{text}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </section>
 
