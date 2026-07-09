@@ -367,7 +367,7 @@ const StudentsPage = () => {
                   <TabsTrigger key={tab} value={tab}>{tab}</TabsTrigger>
                 ))}
               </TabsList>
-              <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_id", "full_name", "status", "approval_status"])} />
+              <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_access_code", "student_id", "full_name", "status", "approval_status"])} />
               <ProfileTab value="personal" data={pick(selectedStudent, ["gender", "date_of_birth", "birth_certificate_no", "nationality", "religion", "special_needs"])} />
               <ProfileTab value="guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
               <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "stream", "year_of_study", "previous_school", "transfer_reason", "last_class"])} />

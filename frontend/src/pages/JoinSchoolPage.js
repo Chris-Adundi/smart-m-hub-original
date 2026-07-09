@@ -43,6 +43,7 @@ const JoinSchoolPage = () => {
     email: "",
     password: "",
     admission_number: "",
+    student_access_code: "",
   });
 
   const updateField = (field, value) => {
@@ -69,8 +70,12 @@ const JoinSchoolPage = () => {
     if (!formData.password)
       return toast.error("Password is required");
 
-    if (requiresAdmissionNumber && !formData.admission_number.trim()) {
-      return toast.error("Admission number is required");
+    if (
+      requiresAdmissionNumber &&
+      !formData.admission_number.trim() &&
+      !formData.student_access_code.trim()
+    ) {
+      return toast.error("Admission number or student access code is required");
     }
 
     setLoading(true);
@@ -84,6 +89,8 @@ const JoinSchoolPage = () => {
         password: formData.password,
         admission_number:
           formData.admission_number?.trim() || null,
+        student_access_code:
+          formData.student_access_code?.trim().toUpperCase() || null,
       };
 
       const response = await apiClient.post(
@@ -200,17 +207,33 @@ const JoinSchoolPage = () => {
             </div>
 
             {requiresAdmissionNumber && (
-              <div className="space-y-2">
-                <Label>Admission Number</Label>
-                <Input
-                  value={formData.admission_number}
-                  onChange={(e) =>
-                    updateField(
-                      "admission_number",
-                      e.target.value
-                    )
-                  }
-                />
+              <div className="grid gap-4">
+                <div className="space-y-2">
+                  <Label>Student Access Code</Label>
+                  <Input
+                    value={formData.student_access_code}
+                    onChange={(e) =>
+                      updateField(
+                        "student_access_code",
+                        e.target.value.toUpperCase()
+                      )
+                    }
+                    placeholder="STU-XXXXXXXX"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Admission Number</Label>
+                  <Input
+                    value={formData.admission_number}
+                    onChange={(e) =>
+                      updateField(
+                        "admission_number",
+                        e.target.value
+                      )
+                    }
+                    placeholder="Alternative to access code"
+                  />
+                </div>
               </div>
             )}
 

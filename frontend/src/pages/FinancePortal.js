@@ -55,6 +55,7 @@ const FinancePortal = () => {
   const user = authService.getUser() || {};
 
   const [payments, setPayments] = useState([]);
+  const [students, setStudents] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [feeStructures, setFeeStructures] = useState([]);
   const [summary, setSummary] = useState({});
@@ -105,11 +106,12 @@ const FinancePortal = () => {
       try {
         setLoading(true);
 
-        const [paymentsRes, txnRes, summaryRes, feesRes] = await Promise.all([
+        const [paymentsRes, txnRes, summaryRes, feesRes, studentsRes] = await Promise.all([
           apiClient.get("/payments?approval_status=all").catch(() => ({ data: [] })),
           apiClient.get("/finance/transactions").catch(() => ({ data: [] })),
           apiClient.get("/finance/summary").catch(() => ({ data: {} })),
           apiClient.get("/finance/fee-structures").catch(() => ({ data: [] })),
+          apiClient.get("/students?approval_status=approved").catch(() => ({ data: [] })),
         ]);
 
         if (!mounted) return;
@@ -136,6 +138,13 @@ const FinancePortal = () => {
             ? feesRes.data
             : feesRes?.data?.data ||
               feesRes?.data?.fee_structures ||
+              []
+        );
+        setStudents(
+          Array.isArray(studentsRes?.data)
+            ? studentsRes.data
+            : studentsRes?.data?.data ||
+              studentsRes?.data?.students ||
               []
         );
       } catch (error) {
@@ -219,6 +228,33 @@ const FinancePortal = () => {
     } catch (error) {
       toast.error(error?.response?.data?.detail || "Failed to save fee structure");
     }
+  };
+
+  const updateFeeStatus = async (studentId, status) => {
+    try {
+      await apiClient.patch("/finance/fee-status", {
+        student_id: studentId,
+        status,
+        note: "Set by finance portal",
+      });
+      toast.success("Fee status submitted for admin approval");
+      setStudents((prev) =>
+        prev.map((student) =>
+          student.id === studentId
+            ? { ...student, fee_status: status, fee_status_approval_status: "pending" }
+            : student
+        )
+      );
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to update fee status");
+    }
+  };
+
+  const feeStatusClass = (status) => {
+    if (status === "cleared") return "text-emerald-300 bg-emerald-500/10";
+    if (status === "warning") return "text-yellow-300 bg-yellow-500/10";
+    if (status === "send_home") return "text-red-300 bg-red-500/10";
+    return "text-slate-300 bg-slate-500/10";
   };
 
   if (loading) {
@@ -424,6 +460,7 @@ const FinancePortal = () => {
 
         <TabsList>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="students">Students</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="fee_structures">Fee Structures</TabsTrigger>
         </TabsList>
@@ -446,6 +483,48 @@ const FinancePortal = () => {
                   <TableCell>{t?.transaction_type}</TableCell>
                   <TableCell>{t?.category}</TableCell>
                   <TableCell>{money(t?.amount).toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TabsContent>
+
+        <TabsContent value="students">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Student</TableHead>
+                <TableHead>Admission</TableHead>
+                <TableHead>Class</TableHead>
+                <TableHead>Fee Status</TableHead>
+                <TableHead>Set Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {students.map((student) => (
+                <TableRow key={student.id}>
+                  <TableCell>{student.full_name}</TableCell>
+                  <TableCell>{student.admission_number}</TableCell>
+                  <TableCell>{student.class_name || "N/A"}</TableCell>
+                  <TableCell>
+                    <span className={`px-2 py-1 rounded text-xs ${feeStatusClass(student.fee_status)}`}>
+                      {student.fee_status || "not set"}
+                      {student.fee_status_approval_status === "pending" ? " - pending approval" : ""}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "cleared")}>
+                        Cleared
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "warning")}>
+                        Warning
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "send_home")}>
+                        Send Home
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

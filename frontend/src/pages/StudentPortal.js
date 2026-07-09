@@ -92,15 +92,14 @@ const StudentPortal = () => {
   const student = data?.student ?? null;
   const children = Array.isArray(data?.children) ? data.children : [];
   const results = Array.isArray(data?.results) ? data.results : [];
+  const exams = Array.isArray(data?.exams) ? data.exams : results.filter((r) => (r?.result_type || "exam") === "exam");
+  const assessments = Array.isArray(data?.assessments) ? data.assessments : results.filter((r) => r?.result_type === "assessment");
   const payments = Array.isArray(data?.payments) ? data.payments : [];
   const announcements = Array.isArray(data?.announcements)
     ? data.announcements
     : [];
-  const attendance = Array.isArray(data?.attendance)
-    ? data.attendance
-    : [];
-
   const feeBalance = safeNum(data?.fee_balance);
+  const feeStatus = data?.fee_status || "Not published";
 
   /* ---------------- PDF FEES ---------------- */
   const generateFeeStatement = () => {
@@ -150,8 +149,9 @@ const StudentPortal = () => {
           h1 { margin: 0; font-size: 22px; }
           table { width: 100%; border-collapse: collapse; margin-top: 18px; }
           td, th { border: 1px solid #d1d5db; padding: 10px; text-align: left; }
-          .footer { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+          .footer { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
           .line { border-bottom: 1px solid #111827; height: 32px; }
+          .stamp img { max-width: 120px; max-height: 80px; object-fit: contain; }
         </style>
       </head>
       <body>
@@ -170,15 +170,33 @@ const StudentPortal = () => {
             <tr><th>Admission Number</th><td>${payment?.admission_number || student?.admission_number || "-"}</td></tr>
             <tr><th>Received From</th><td>${payment?.received_from || student?.guardian_name || "-"}</td></tr>
             <tr><th>Payment Method</th><td>${payment?.payment_method || "-"}</td></tr>
-            <tr><th>Reference</th><td>${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}</td></tr>
-            <tr><th>Item</th><td>${payment?.payment_type || "Fees"}</td></tr>
-            <tr><th>Total Paid</th><td>KES ${safeNum(payment?.amount).toLocaleString()}</td></tr>
-            <tr><th>Outstanding Balance</th><td>KES ${feeBalance.toLocaleString()}</td></tr>
+            <tr><th>Transaction / Reference Number</th><td>${payment?.transaction_reference || payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}</td></tr>
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Item</th><th>Term</th><th>Amount</th><th>Remarks</th></tr></thead>
+          <tbody>
+            ${(payment?.payment_breakdown || []).map((item) => `
+              <tr>
+                <td>${item.item || "-"}</td>
+                <td>${item.term || payment?.term || "-"}</td>
+                <td>KES ${safeNum(item.amount).toLocaleString()}</td>
+                <td>${item.remarks || ""}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+        <table>
+          <tbody>
+            <tr><th>Total Amount Due</th><td>KES ${safeNum(payment?.total_amount_due).toLocaleString()}</td></tr>
+            <tr><th>Total Paid</th><td>KES ${safeNum(payment?.total_paid || payment?.amount).toLocaleString()}</td></tr>
+            <tr><th>Outstanding Balance</th><td>KES ${safeNum(payment?.outstanding_balance ?? feeBalance).toLocaleString()}</td></tr>
           </tbody>
         </table>
         <div class="footer">
           <div><p>Received By</p><div class="line"></div></div>
           <div><p>Approved By</p><div class="line"></div></div>
+          <div class="stamp"><p>Official School Stamp</p>${payment?.school_stamp ? `<img src="${payment.school_stamp}" />` : `<div class="line"></div>`}</div>
         </div>
       </body>
     </html>`;
@@ -206,10 +224,13 @@ const StudentPortal = () => {
       `Admission Number: ${payment?.admission_number || student?.admission_number || "-"}`,
       `Received From: ${payment?.received_from || student?.guardian_name || "-"}`,
       `Payment Method: ${payment?.payment_method || "-"}`,
-      `Reference: ${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
-      `Item: ${payment?.payment_type || "Fees"}`,
-      `Total Paid: KES ${safeNum(payment?.amount).toLocaleString()}`,
-      `Outstanding Balance: KES ${feeBalance.toLocaleString()}`,
+      `Transaction / Reference Number: ${payment?.transaction_reference || payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
+      `Total Amount Due: KES ${safeNum(payment?.total_amount_due).toLocaleString()}`,
+      `Total Paid: KES ${safeNum(payment?.total_paid || payment?.amount).toLocaleString()}`,
+      `Outstanding Balance: KES ${safeNum(payment?.outstanding_balance ?? feeBalance).toLocaleString()}`,
+      `Received By: ${payment?.submitted_by || "-"}`,
+      `Approved By: ${payment?.approved_by || "-"}`,
+      `Official School Stamp: ${payment?.school_stamp ? "Uploaded" : "-"}`,
     ];
     lines.forEach((line, index) => doc.text(line, 15, 34 + index * 9));
     doc.save(`${payment?.receipt_number || "receipt"}.pdf`);
@@ -312,18 +333,18 @@ const StudentPortal = () => {
 
         <Card className="bg-[#1A2332] border-[#1E293B]">
           <CardContent className="p-4">
-            <p className="text-slate-400 text-sm">Fee Balance</p>
+            <p className="text-slate-400 text-sm">Fee Status</p>
             <p className="text-white text-xl font-bold">
-              KES {feeBalance}
+              {feeStatus}
             </p>
           </CardContent>
         </Card>
 
         <Card className="bg-[#1A2332] border-[#1E293B]">
           <CardContent className="p-4">
-            <p className="text-slate-400 text-sm">Results</p>
+            <p className="text-slate-400 text-sm">Exam / Assessment Files</p>
             <p className="text-white text-xl font-bold">
-              {results.length}
+              {exams.length + assessments.length}
             </p>
           </CardContent>
         </Card>
@@ -345,7 +366,6 @@ const StudentPortal = () => {
         <TabsList className="bg-[#0F1A2A] border border-[#1E293B]">
           <TabsTrigger value="results">Results</TabsTrigger>
           <TabsTrigger value="fees">Fees</TabsTrigger>
-          <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="announcements">Announcements</TabsTrigger>
         </TabsList>
 
@@ -369,8 +389,10 @@ const StudentPortal = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Subject</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Marks</TableHead>
                     <TableHead>Grade</TableHead>
+                    <TableHead>Download</TableHead>
                   </TableRow>
                 </TableHeader>
 
@@ -378,6 +400,7 @@ const StudentPortal = () => {
                   {results.map((r, i) => (
                     <TableRow key={r?.id || i}>
                       <TableCell>{r?.subject || "-"}</TableCell>
+                      <TableCell>{r?.result_type || "exam"}</TableCell>
                       <TableCell>
                         {safeNum(r?.marks)}/{safeNum(r?.max_marks)}
                       </TableCell>
@@ -385,6 +408,13 @@ const StudentPortal = () => {
                         <Badge className={gradeColor(r?.grade)}>
                           {r?.grade || "-"}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {r?.report_url ? (
+                          <a className="text-emerald-400 underline" href={r.report_url} target="_blank" rel="noreferrer">
+                            Download
+                          </a>
+                        ) : "-"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -403,6 +433,9 @@ const StudentPortal = () => {
                 <CreditCard className="w-4 h-4 text-green-400" />
                 Fees
               </CardTitle>
+              <div className="text-slate-300 text-sm">
+                Status: <span className="font-semibold text-white">{feeStatus}</span> | Balance: KES {feeBalance.toLocaleString()}
+              </div>
 
               <Button onClick={generateFeeStatement}>
                 <Download className="w-4 h-4 mr-2" />
@@ -450,15 +483,6 @@ const StudentPortal = () => {
               )}
             </CardContent>
 
-          </Card>
-        </TabsContent>
-
-        {/* ATTENDANCE */}
-        <TabsContent value="attendance">
-          <Card className="bg-[#1A2332] border-[#1E293B] p-6 text-slate-400">
-            {attendance.length === 0
-              ? "No attendance data available"
-              : "Attendance loaded"}
           </Card>
         </TabsContent>
 

@@ -53,6 +53,11 @@ const FeesPage = () => {
     cheque_number: "",
     student_id: "",
     receipt_url: "",
+    term: "",
+    received_from: "",
+    transaction_reference: "",
+    total_amount_due: "",
+    outstanding_balance: "",
   });
 
   // ----------------------------
@@ -106,6 +111,8 @@ const FeesPage = () => {
       await apiClient.post("/payments/initiate", {
         ...formData,
         amount: Number(formData.amount || 0),
+        total_amount_due: formData.total_amount_due ? Number(formData.total_amount_due) : null,
+        outstanding_balance: formData.outstanding_balance ? Number(formData.outstanding_balance) : null,
       });
 
       toast.success("Payment recorded successfully");
@@ -121,6 +128,11 @@ const FeesPage = () => {
         cheque_number: "",
         student_id: "",
         receipt_url: "",
+        term: "",
+        received_from: "",
+        transaction_reference: "",
+        total_amount_due: "",
+        outstanding_balance: "",
       });
 
       fetchPayments();
@@ -274,6 +286,33 @@ const FeesPage = () => {
                   }
                   required
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Term</Label>
+                  <Input value={formData.term} onChange={(e) => setFormData({ ...formData, term: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Received From</Label>
+                  <Input value={formData.received_from} onChange={(e) => setFormData({ ...formData, received_from: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Transaction / Reference Number</Label>
+                <Input value={formData.transaction_reference} onChange={(e) => setFormData({ ...formData, transaction_reference: e.target.value })} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Total Amount Due</Label>
+                  <Input type="number" value={formData.total_amount_due} onChange={(e) => setFormData({ ...formData, total_amount_due: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Outstanding Balance</Label>
+                  <Input type="number" value={formData.outstanding_balance} onChange={(e) => setFormData({ ...formData, outstanding_balance: e.target.value })} />
+                </div>
               </div>
 
               <div className="space-y-2">

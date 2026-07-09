@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
+import { uploadManagedFile } from "@/utils/uploads";
 
 import {
   Plus,
@@ -119,6 +120,8 @@ const TeacherPortal = () => {
     subject: "",
     marks: "",
     teacher_comments: "",
+    report_url: "",
+    result_type: "assessment",
   });
 
   const [attendanceForm, setAttendanceForm] = useState({
@@ -203,6 +206,8 @@ const TeacherPortal = () => {
         subject: "",
         marks: "",
         teacher_comments: "",
+        report_url: "",
+        result_type: "assessment",
       });
 
       setResultsDialogOpen(false);
@@ -247,6 +252,18 @@ const TeacherPortal = () => {
     }
   };
 
+  const handleReportUpload = async (file) => {
+    if (!file) return;
+    try {
+      const category = resultForm.result_type === "exam" ? "exam" : "assessment";
+      const url = await uploadManagedFile(file, category);
+      setResultForm((prev) => ({ ...prev, report_url: url }));
+      toast.success("Report uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Report upload failed");
+    }
+  };
+
   /* =========================
      ATTENDANCE
   ========================= */
@@ -260,6 +277,7 @@ const TeacherPortal = () => {
         date: attendanceForm.date,
         status: attendanceForm.status,
         remarks: attendanceForm.remarks,
+        class_name: asArray(students).find((student) => student.id === attendanceForm.student_id)?.class_name || null,
       });
 
       toast.success("Attendance recorded");
@@ -301,6 +319,9 @@ const TeacherPortal = () => {
 
         <p className="text-slate-400">
           Welcome back {user?.full_name || "Teacher"}
+        </p>
+        <p className="text-slate-500 text-sm mt-1">
+          Assigned classes: {[...new Set(asArray(students).map((s) => s.class_name).filter(Boolean))].join(", ") || "No assigned class records yet"}
         </p>
       </div>
 
@@ -404,8 +425,20 @@ const TeacherPortal = () => {
               </Select>
             </div>
             <Input placeholder="Subject" value={resultForm.subject} onChange={(e) => setResultForm({ ...resultForm, subject: e.target.value })} required />
+            <Select value={resultForm.result_type} onValueChange={(value) => setResultForm({ ...resultForm, result_type: value })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="assessment">Assessment</SelectItem>
+                <SelectItem value="exam">Exam</SelectItem>
+              </SelectContent>
+            </Select>
             <Input type="number" placeholder="Marks" value={resultForm.marks} onChange={(e) => setResultForm({ ...resultForm, marks: e.target.value })} required />
             <Textarea placeholder="Teacher comments" value={resultForm.teacher_comments} onChange={(e) => setResultForm({ ...resultForm, teacher_comments: e.target.value })} />
+            <div className="space-y-2">
+              <Label>Upload Exam / Assessment Report</Label>
+              <Input type="file" accept="image/*,.pdf" onChange={(e) => handleReportUpload(e.target.files?.[0])} />
+              {resultForm.report_url && <p className="text-xs text-emerald-400">Report uploaded and will await admin approval</p>}
+            </div>
             <Button type="submit" className="w-full">Submit Result</Button>
           </form>
         </DialogContent>

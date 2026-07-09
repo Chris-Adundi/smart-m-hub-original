@@ -164,6 +164,16 @@ const LoginPage = () => {
     school_code: new URLSearchParams(location.search).get("school") || "",
     email: "",
     password: "",
+    admission_number: "",
+    student_access_code: "",
+  });
+  const [resetMode, setResetMode] = useState(false);
+  const [resetCodeSent, setResetCodeSent] = useState(false);
+  const [resetForm, setResetForm] = useState({
+    email: "",
+    school_code: "",
+    code: "",
+    new_password: "",
   });
   const [resolvedSchool, setResolvedSchool] = useState(null);
   const query = new URLSearchParams(location.search);
@@ -307,6 +317,14 @@ const selectedRoleData = roles.find(
             finalRole === "super_admin"
               ? null
               : formData.school_code.trim().toUpperCase(),
+          admission_number:
+            finalRole === "student" && formData.admission_number.trim()
+              ? formData.admission_number.trim()
+              : null,
+          student_access_code:
+            finalRole === "student" && formData.student_access_code.trim()
+              ? formData.student_access_code.trim().toUpperCase()
+              : null,
         }
       );
 
@@ -533,6 +551,38 @@ const selectedRoleData = roles.find(
     }
   };
 
+  const handleRequestReset = async (event) => {
+    event.preventDefault();
+    try {
+      await apiClient.post("/auth/forgot-password", {
+        email: resetForm.email.trim().toLowerCase(),
+        school_code: resetForm.school_code.trim().toUpperCase() || null,
+      });
+      setResetCodeSent(true);
+      toast.success("Verification code sent to the registered phone number");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to request reset code");
+    }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    try {
+      await apiClient.post("/auth/reset-password", {
+        email: resetForm.email.trim().toLowerCase(),
+        school_code: resetForm.school_code.trim().toUpperCase() || null,
+        code: resetForm.code.trim(),
+        new_password: resetForm.new_password,
+      });
+      toast.success("Password reset. Admin approval is required before login.");
+      setResetMode(false);
+      setResetCodeSent(false);
+      setResetForm({ email: "", school_code: "", code: "", new_password: "" });
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to reset password");
+    }
+  };
+
   // ========================================
   // UI
   // ========================================
@@ -633,6 +683,61 @@ const selectedRoleData = roles.find(
 
             </div>
 
+            {resetMode ? (
+              <form
+                onSubmit={resetCodeSent ? handleResetPassword : handleRequestReset}
+                className="space-y-5"
+              >
+                <div>
+                  <Label className="text-slate-300 mb-2 block">School Code</Label>
+                  <Input
+                    placeholder="SMH-KE-000021"
+                    value={resetForm.school_code}
+                    onChange={(e) => setResetForm({ ...resetForm, school_code: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-300 mb-2 block">Email</Label>
+                  <Input
+                    type="email"
+                    value={resetForm.email}
+                    onChange={(e) => setResetForm({ ...resetForm, email: e.target.value })}
+                    required
+                  />
+                </div>
+                {resetCodeSent && (
+                  <>
+                    <div>
+                      <Label className="text-slate-300 mb-2 block">Verification Code</Label>
+                      <Input
+                        value={resetForm.code}
+                        onChange={(e) => setResetForm({ ...resetForm, code: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-slate-300 mb-2 block">New Password</Label>
+                      <Input
+                        type="password"
+                        value={resetForm.new_password}
+                        onChange={(e) => setResetForm({ ...resetForm, new_password: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </>
+                )}
+                <Button type="submit" className="w-full">
+                  {resetCodeSent ? "Reset Password" : "Send Verification Code"}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setResetMode(false)}
+                  className="w-full text-slate-400 hover:text-white text-sm"
+                >
+                  Back to sign in
+                </button>
+              </form>
+            ) : (
             <form
               onSubmit={handleSubmit}
               className="space-y-5"
@@ -681,6 +786,31 @@ const selectedRoleData = roles.find(
                 />
 
               </div>
+
+              {selectedRole === "student" && (
+                <div className="grid gap-3">
+                  <div>
+                    <Label className="text-slate-300 mb-2 block">
+                      Student Access Code
+                    </Label>
+                    <Input
+                      placeholder="STU-XXXXXXXX"
+                      value={formData.student_access_code}
+                      onChange={(e) => updateField("student_access_code", e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-slate-300 mb-2 block">
+                      Admission Number
+                    </Label>
+                    <Input
+                      placeholder="Alternative to access code"
+                      value={formData.admission_number}
+                      onChange={(e) => updateField("admission_number", e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* PASSWORD */}
               <div>
@@ -743,9 +873,19 @@ const selectedRoleData = roles.find(
               </Button>
 
             </form>
+            )}
 
             {/* BACK */}
             <div className="mt-5 text-center">
+              {!resetMode && (
+                <button
+                  type="button"
+                  onClick={() => setResetMode(true)}
+                  className="block w-full mb-3 text-slate-400 hover:text-white text-sm"
+                >
+                  Forgot password?
+                </button>
+              )}
 
               <button
                 type="button"

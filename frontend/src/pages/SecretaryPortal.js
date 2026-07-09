@@ -371,6 +371,11 @@ const SecretaryPortal = () => {
                     <p className="text-white">{s.full_name}</p>
                     <p className="text-slate-400 text-sm">
                       {s.admission_number}
+                      {s.student_access_code ? (
+                        <span className="block text-xs text-emerald-400">
+                          Access: {s.student_access_code}
+                        </span>
+                      ) : null}
                     </p>
                   </div>
 

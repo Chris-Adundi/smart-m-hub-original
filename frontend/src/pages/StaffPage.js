@@ -97,6 +97,20 @@ const StaffPage = () => {
     }
   };
 
+  const deactivateUser = async (member) => {
+    const userId = member?.user_id || member?.id;
+    if (!userId) return toast.error("User ID missing");
+    try {
+      await apiClient.patch(`/admin/users/${userId}/deactivate`, {
+        reason: "Former user",
+      });
+      toast.success("User deactivated");
+      fetchStaff();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to deactivate user");
+    }
+  };
+
   const safeStaff = Array.isArray(staff) ? staff : [];
 
   return (
@@ -244,8 +258,11 @@ const StaffPage = () => {
                       <SelectItem value="finance">
                         Finance Officer
                       </SelectItem>
-                      <SelectItem value="school_admin">
-                        School Admin
+                      <SelectItem value="secretary">
+                        Secretary
+                      </SelectItem>
+                      <SelectItem value="supporting_staff">
+                        Supporting Staff
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -309,6 +326,8 @@ const StaffPage = () => {
                   <TableHead>Department</TableHead>
                   <TableHead>Position</TableHead>
                   <TableHead>Phone</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -316,14 +335,14 @@ const StaffPage = () => {
 
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">
+                    <TableCell colSpan={7} className="text-center py-8">
                       Loading...
                     </TableCell>
                   </TableRow>
 
                 ) : safeStaff.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-slate-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-slate-500">
                       No staff members found
                     </TableCell>
                   </TableRow>
@@ -339,6 +358,17 @@ const StaffPage = () => {
                       <TableCell>{member.position}</TableCell>
                       <TableCell>
                         {member.phone || member.user?.phone}
+                      </TableCell>
+                      <TableCell>{member.status || (member.is_active === false ? "deactivated" : "active")}</TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={member.is_active === false}
+                          onClick={() => deactivateUser(member)}
+                        >
+                          Deactivate
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

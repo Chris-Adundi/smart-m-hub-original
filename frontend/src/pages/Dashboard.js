@@ -115,6 +115,7 @@ const Dashboard = () => {
     useState(false);
   const [schoolIdentity, setSchoolIdentity] = useState(null);
   const [globalAnnouncements, setGlobalAnnouncements] = useState([]);
+  const [supportNotices, setSupportNotices] = useState([]);
 
   // =========================
 // SAFE USER
@@ -211,6 +212,16 @@ const isStudent =
           setGlobalAnnouncements([]);
         }
 
+        if (isSchoolAdmin || isFinance || isSecretary) {
+          try {
+            const noticesRes = await apiClient.get("/support-notices");
+            const data = noticesRes?.data;
+            setSupportNotices(Array.isArray(data) ? data : data?.data || []);
+          } catch {
+            setSupportNotices([]);
+          }
+        }
+
         // =========================
         // ADMIN PENDING DATA
         // =========================
@@ -297,7 +308,7 @@ const isStudent =
       } finally {
         setLoading(false);
       }
-    }, [isAdmin]);
+    }, [isAdmin, isSchoolAdmin, isFinance, isSecretary]);
 
   // =========================
   // INITIAL LOAD
@@ -360,6 +371,19 @@ const isStudent =
       );
     } finally {
       setApprovalLoading(false);
+    }
+  };
+
+  const markNoticeRead = async (noticeId) => {
+    try {
+      await apiClient.patch(`/support-notices/${noticeId}/read`);
+      setSupportNotices((prev) =>
+        prev.map((notice) =>
+          notice.id === noticeId ? { ...notice, is_read: true } : notice
+        )
+      );
+    } catch {
+      toast.error("Failed to mark notice read");
     }
   };
 
@@ -526,6 +550,43 @@ const isStudent =
         </div>
       )}
 
+      {supportNotices.length > 0 && (
+        <Card className="bg-[#1A2332] border-[#1E293B]">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Support & Platform Notices</h2>
+                <p className="text-slate-400 text-sm">Messages from Smart M Hub support and billing</p>
+              </div>
+              <span className="text-xs text-slate-400">
+                {supportNotices.filter((notice) => !notice.is_read).length} unread
+              </span>
+            </div>
+            <div className="space-y-3">
+              {supportNotices.slice(0, 5).map((notice) => (
+                <div
+                  key={notice.id}
+                  className={`rounded-lg border p-3 ${notice.is_read ? "border-[#1E293B] bg-[#0F172A]" : "border-amber-500/40 bg-amber-500/10"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-white">{notice.title}</p>
+                      <p className="text-slate-300 text-sm mt-1">{notice.message}</p>
+                      <p className="text-slate-500 text-xs mt-2">{notice.notice_type || "support"} | {notice.severity || "info"}</p>
+                    </div>
+                    {!notice.is_read && (
+                      <Button size="sm" variant="outline" onClick={() => markNoticeRead(notice.id)}>
+                        Mark read
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {isSchoolAdmin && schoolIdentity && (
         <Card
           className="border-white/10 overflow-hidden"
@@ -667,7 +728,7 @@ const isStudent =
 
             <p className="text-slate-400 mt-2">
               Access your academic records,
-              fees, timetable, results and
+              fees, results and
               announcements from the sidebar.
             </p>
 

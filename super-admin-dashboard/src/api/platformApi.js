@@ -115,4 +115,19 @@ export async function getPlatformControl() {
   return data;
 }
 
+export async function getDiagnostics() {
+  const { data } = await api.get("/diagnostics");
+  return data;
+}
+
+export async function updateDiagnosticStatus(id, payload) {
+  const { data } = await api.patch(`/diagnostics/${encodeURIComponent(id)}`, payload);
+  return data;
+}
+
+export async function createSupportNotice(payload) {
+  const { data } = await api.post("/support-notices", payload);
+  return data;
+}
+
 export default api;

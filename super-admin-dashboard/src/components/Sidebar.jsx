@@ -62,6 +62,10 @@ export default function Sidebar() {
           System Health
         </NavLink>
 
+        <NavLink to="/diagnostics" style={linkStyle}>
+          Diagnostics
+        </NavLink>
+
         <NavLink to="/approvals" style={linkStyle}>
           Approvals
         </NavLink>

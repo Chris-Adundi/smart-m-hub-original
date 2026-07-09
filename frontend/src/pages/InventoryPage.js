@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/App";
 import { toast } from "sonner";
 import { Package, Plus, Search } from "lucide-react";
+import { uploadManagedFile } from "@/utils/uploads";
 
 const initialForm = {
   name: "",
@@ -32,6 +33,7 @@ const initialForm = {
   condition: "good",
   reorder_level: 0,
   notes: "",
+  document_url: "",
 };
 
 const InventoryPage = () => {
@@ -106,6 +108,17 @@ const InventoryPage = () => {
     }
   };
 
+  const uploadInventoryFile = async (file) => {
+    if (!file) return;
+    try {
+      const url = await uploadManagedFile(file, "inventory");
+      setForm((prev) => ({ ...prev, document_url: url }));
+      toast.success("Inventory file uploaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Inventory upload failed");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -150,6 +163,11 @@ const InventoryPage = () => {
                 <Label>Notes</Label>
                 <Textarea value={form.notes || ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </div>
+              <div className="space-y-2">
+                <Label>Upload Photo / Document</Label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => uploadInventoryFile(e.target.files?.[0])} />
+                {form.document_url && <p className="text-xs text-emerald-400">Inventory file uploaded</p>}
+              </div>
               <Button type="submit" className="w-full">Save Item</Button>
             </form>
           </DialogContent>
@@ -190,6 +208,7 @@ const InventoryPage = () => {
                   <TableHead>Quantity</TableHead>
                   <TableHead>Condition</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>File</TableHead>
                   <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
@@ -204,6 +223,7 @@ const InventoryPage = () => {
                       <TableCell>{item.quantity}</TableCell>
                       <TableCell>{item.condition || "-"}</TableCell>
                       <TableCell><Badge className={low ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}>{low ? "Low stock" : "Available"}</Badge></TableCell>
+                      <TableCell>{item.document_url ? <a className="text-emerald-400 underline" href={item.document_url} target="_blank" rel="noreferrer">Open</a> : "-"}</TableCell>
                       <TableCell><Button size="sm" variant="outline" onClick={() => openEditor(item)}>Edit</Button></TableCell>
                     </TableRow>
                   );

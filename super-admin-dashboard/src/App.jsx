@@ -12,6 +12,7 @@ import SupportTickets from "./pages/SupportTickets";
 import SystemHealth from "./pages/SystemHealth";
 import Approvals from "./pages/Approvals";
 import PlatformControl from "./pages/PlatformControl";
+import DiagnosticsCenter from "./pages/DiagnosticsCenter";
 import Login from "./pages/Login";
 
 function RequireSuperAdmin({ children }) {
@@ -39,6 +40,7 @@ export default function App() {
 
           <Route path="support" element={<SupportTickets />} />
           <Route path="system" element={<SystemHealth />} />
+          <Route path="diagnostics" element={<DiagnosticsCenter />} />
           <Route path="approvals" element={<Approvals />} />
           <Route path="control" element={<PlatformControl />} />
 
