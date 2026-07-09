@@ -13,18 +13,18 @@ import {
 } from "lucide-react";
 
 const features = [
-  ["Admissions", "Complete admission records with guardians, class assignment, documents and private access codes.", Users],
-  ["Finance", "Student-based fee tracking, receipts, balances, approval workflows and payment history.", CreditCard],
-  ["Academics", "Teacher attendance, exam uploads, assessment reports and controlled student portal publication.", GraduationCap],
-  ["Platform Control", "Super admin oversight for schools, approvals, support, analytics and diagnostics.", ShieldCheck],
+  ["Administration", "Keep admissions, staff records, approvals and daily school tasks organized in one place.", Users],
+  ["Finance", "Track fees, receipts, balances and payment follow-up with clear student-level records.", CreditCard],
+  ["Academics", "Manage attendance, exams, assessments and approved reports without scattered paperwork.", GraduationCap],
+  ["Communication", "Share the right notices, updates and student information with the right people securely.", ShieldCheck],
 ];
 
 const storyboard = [
-  "Open with a school admin registering a school and receiving approval.",
-  "Show the secretary admitting a student and issuing the private access code.",
-  "Record fees, generate a receipt and route it to admin approval.",
-  "Teacher uploads an assessment report and attendance for approval.",
-  "Parent logs in to view announcements, fee status, receipts and downloadable reports.",
+  "Open with a school administrator reviewing the day from one clear dashboard.",
+  "Show admissions, class placement and student records handled smoothly.",
+  "Record a fee payment, generate a receipt and send it for approval.",
+  "Teacher submits attendance and assessment reports for review.",
+  "Parent logs in to view approved notices, fee status, receipts and reports.",
 ];
 
 export default function LandingPage() {
@@ -53,21 +53,21 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-[#070B14]/75" />
           <div className="relative mx-auto max-w-7xl px-6 min-h-[78vh] flex items-center">
             <div className="max-w-3xl py-20">
-              <p className="text-emerald-300 text-sm font-semibold uppercase tracking-wider">Commercial school management platform</p>
+              <p className="text-emerald-300 text-sm font-semibold uppercase tracking-wider">Trusted school operations hub</p>
               <h1 className="mt-5 text-5xl md:text-6xl font-bold leading-tight">
                 Smart M Hub
               </h1>
               <p className="mt-6 text-lg text-slate-200 max-w-2xl">
-                A secure, tenant-isolated platform for school operations, finance, academics, approvals, parent portals and platform-wide supervision.
+                Simplify school administration, academics, finance, communication and student services in one secure, easy-to-use space.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button onClick={() => navigate("/setup-school")} className="gap-2">
-                  Start School Registration <ArrowRight className="h-4 w-4" />
+                  Register Your School <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button variant="outline" onClick={() => navigate("/login")}>Access Portal</Button>
               </div>
               <div className="mt-10 grid grid-cols-3 gap-4 max-w-2xl">
-                {["Tenant isolated", "Approval driven", "Production focused"].map((item) => (
+                {["Secure access", "Clear approvals", "Daily school clarity"].map((item) => (
                   <div key={item} className="flex items-center gap-2 text-sm text-slate-200">
                     <CheckCircle2 className="h-4 w-4 text-emerald-300" />
                     {item}
@@ -97,25 +97,25 @@ export default function LandingPage() {
             <div>
               <div className="flex items-center gap-3">
                 <Video className="h-6 w-6 text-emerald-300" />
-                <h2 className="text-3xl font-bold">Client Demo Video</h2>
+                <h2 className="text-3xl font-bold">See Smart M Hub in Action</h2>
               </div>
               <p className="mt-4 text-slate-300">
-                Placeholder for the Smart M Hub product walkthrough. Upload the finished demo video here when ready.
+                A short walkthrough can help school leaders see how everyday work becomes simpler and better coordinated.
               </p>
               <div className="mt-6 aspect-video rounded-lg border border-dashed border-emerald-400/40 bg-[#070B14] flex flex-col items-center justify-center text-center p-6">
                 <Video className="h-12 w-12 text-emerald-300" />
-                <p className="mt-4 text-lg font-semibold">Demo video upload area</p>
+                <p className="mt-4 text-lg font-semibold">Demo video placeholder</p>
                 <p className="mt-2 text-sm text-slate-400 max-w-md">
-                  Suggested format: 2-3 minute MP4 covering registration, approvals, finance, teacher workflows and parent portal access.
+                  Suggested format: 2-3 minutes covering administration, academics, finance, communication and parent access.
                 </p>
               </div>
             </div>
             <Card className="bg-[#101827] border-white/10">
               <CardContent className="p-6 space-y-5">
                 <div>
-                  <h3 className="text-xl font-semibold text-white">Short Marketing Script</h3>
+                  <h3 className="text-xl font-semibold text-white">Demo Script</h3>
                   <p className="mt-3 text-slate-300">
-                    "Smart M Hub gives schools one secure command center for administration, finance, academics and parent communication. From admission to receipts, assessments and approvals, every workflow is organized, auditable and protected by role-based access."
+                    "Smart M Hub helps schools bring administration, academics, finance and communication together. Staff work with clearer records, leaders approve important updates, and parents see only the information meant for their child."
                   </p>
                 </div>
                 <div>
@@ -137,9 +137,9 @@ export default function LandingPage() {
         <section className="mx-auto max-w-7xl px-6 py-16">
           <div className="grid md:grid-cols-3 gap-4">
             {[
-              ["Operational clarity", "Every dashboard widget, approval and record links to meaningful school workflows."],
-              ["Private parent access", "Student portals reveal only the correct child's approved announcements, receipts, fee status and reports."],
-              ["Platform supervision", "Super admin analytics, health checks, diagnostics and support keep commercial operations visible."],
+              ["Less paperwork", "Admissions, fees, reports and notices stay organized so staff spend less time searching."],
+              ["Better parent confidence", "Parents access approved receipts, fee status, announcements and reports for their own child."],
+              ["Clearer leadership", "School leaders can review approvals, activity and key records with confidence."],
             ].map(([title, text]) => (
               <div key={title} className="rounded-lg border border-white/10 bg-[#101827] p-5">
                 <BarChart3 className="h-5 w-5 text-emerald-300" />
