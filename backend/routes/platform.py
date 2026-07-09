@@ -156,6 +156,19 @@ async def create_subscription_reminder(school, invoice, reminder_type, days_unti
         "status": "pending",
         "created_at": now_iso(),
     })
+    await db.support_notices.insert_one({
+        "id": str(ObjectId()),
+        "school_id": school_id,
+        "school_name": school.get("name"),
+        "title": "Subscription payment reminder",
+        "message": f"Your Smart M Hub subscription invoice {invoice.get('invoice_number')} is due in {days_until_due} day(s).",
+        "notice_type": "payment_reminder",
+        "severity": "warning" if days_until_due <= 5 else "info",
+        "read_by": [],
+        "created_by": "system",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    })
     return True
 
 
@@ -177,6 +190,29 @@ async def log_action(action, user, school_id=None, metadata=None):
         "metadata": metadata or {},
         "timestamp": now_iso()
     })
+
+
+def diagnostic_from_error(error: dict, note: dict = None):
+    metadata = error.get("metadata") or {}
+    message = metadata.get("message") or metadata.get("error") or error.get("action") or "System event"
+    return {
+        "id": str(error.get("id") or error.get("_id")),
+        "source_id": str(error.get("id") or error.get("_id")),
+        "message": message,
+        "severity": metadata.get("severity") or ("high" if "failed" in str(error.get("action")) else "medium"),
+        "status": (note or {}).get("status") or "new",
+        "affected_file": metadata.get("affected_file") or metadata.get("file") or "Not captured",
+        "route_or_component": metadata.get("route") or metadata.get("component") or metadata.get("endpoint") or "Not captured",
+        "stack_trace": metadata.get("stack_trace") or metadata.get("traceback") or metadata.get("stack") or "",
+        "suggested_fix": metadata.get("suggested_fix") or "Review the affected route/component, validate request data, and inspect recent audit logs.",
+        "timestamp": error.get("timestamp") or error.get("created_at"),
+        "action": error.get("action"),
+        "school_id": error.get("school_id"),
+        "performed_by": error.get("performed_by"),
+        "fix_notes": (note or {}).get("fix_notes"),
+        "reviewed_by": (note or {}).get("reviewed_by"),
+        "reviewed_at": (note or {}).get("reviewed_at"),
+    }
 
 
 async def serialize_school(school: dict):
@@ -786,3 +822,101 @@ async def billing_check(user=Depends(require_super_admin)):
 async def get_audit_logs(user=Depends(require_super_admin)):
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(500).to_list(500)
     return logs
+
+
+@router.get("/diagnostics")
+async def get_diagnostics(user=Depends(require_super_admin)):
+    action_filter = {
+        "$or": [
+            {"action": {"$regex": "error", "$options": "i"}},
+            {"action": {"$regex": "failed", "$options": "i"}},
+            {"action": {"$regex": "blocked", "$options": "i"}},
+            {"metadata.severity": {"$in": ["high", "critical"]}},
+        ]
+    }
+    audit_errors = await db.audit_logs.find(action_filter, {"_id": 0}).sort("timestamp", -1).limit(200).to_list(200)
+    frontend_errors = await db.diagnostics.find({}, {"_id": 0}).sort("timestamp", -1).limit(200).to_list(200)
+    notes = await db.diagnostic_notes.find({}, {"_id": 0}).to_list(500)
+    note_map = {n.get("source_id"): n for n in notes}
+
+    records = []
+    for error in frontend_errors + audit_errors:
+        source_id = str(error.get("id") or error.get("_id"))
+        records.append(diagnostic_from_error(error, note_map.get(source_id)))
+
+    records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+    return {"success": True, "data": records[:250], "count": min(len(records), 250)}
+
+
+@router.patch("/diagnostics/{source_id}")
+async def update_diagnostic_status(source_id: str, payload: dict, user=Depends(require_super_admin)):
+    diagnostic_status = str(payload.get("status") or "").strip().lower()
+    if diagnostic_status not in {"new", "reviewed", "fixed", "ignored"}:
+        raise HTTPException(status_code=400, detail="Status must be new, reviewed, fixed, or ignored")
+    note = {
+        "source_id": source_id,
+        "status": diagnostic_status,
+        "fix_notes": str(payload.get("fix_notes") or "").strip(),
+        "reviewed_by": user.get("email"),
+        "reviewed_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.diagnostic_notes.update_one(
+        {"source_id": source_id},
+        {"$set": note, "$setOnInsert": {"id": str(ObjectId()), "created_at": now_iso()}},
+        upsert=True,
+    )
+    await log_action("diagnostic_reviewed", user, metadata={"source_id": source_id, "status": diagnostic_status})
+    return {"success": True, "message": "Diagnostic updated"}
+
+
+@router.post("/diagnostics/report")
+async def report_diagnostic(payload: dict, user=Depends(require_super_admin)):
+    record = {
+        "id": str(ObjectId()),
+        "action": payload.get("action") or "frontend_error",
+        "performed_by": user.get("email"),
+        "user_id": user.get("user_id"),
+        "school_id": payload.get("school_id"),
+        "metadata": {
+            "message": payload.get("message"),
+            "severity": payload.get("severity") or "medium",
+            "route": payload.get("route"),
+            "component": payload.get("component"),
+            "affected_file": payload.get("affected_file"),
+            "stack_trace": payload.get("stack_trace"),
+            "suggested_fix": payload.get("suggested_fix"),
+        },
+        "timestamp": now_iso(),
+    }
+    await db.diagnostics.insert_one(record)
+    await log_action("diagnostic_reported", user, payload.get("school_id"), {"diagnostic_id": record["id"]})
+    return {"success": True, "id": record["id"]}
+
+
+@router.post("/support-notices")
+async def create_support_notice(payload: dict, user=Depends(require_super_admin)):
+    school_id = str(payload.get("school_id") or "").strip()
+    if not school_id:
+        raise HTTPException(status_code=400, detail="school_id is required")
+    school = await db.schools.find_one(school_lookup(school_id))
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    notice = {
+        "id": str(ObjectId()),
+        "school_id": str(school.get("id") or school.get("_id")),
+        "school_name": school.get("name"),
+        "title": str(payload.get("title") or "").strip(),
+        "message": str(payload.get("message") or "").strip(),
+        "notice_type": payload.get("notice_type") or "support",
+        "severity": payload.get("severity") or "info",
+        "read_by": [],
+        "created_by": user.get("email"),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    if not notice["title"] or not notice["message"]:
+        raise HTTPException(status_code=400, detail="Title and message are required")
+    await db.support_notices.insert_one(notice)
+    await log_action("support_notice_created", user, notice["school_id"], {"notice_id": notice["id"]})
+    return {"success": True, "notice": serialize_doc(notice)}

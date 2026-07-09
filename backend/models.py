@@ -15,6 +15,7 @@ class UserRole(str, Enum):
     TEACHER = "teacher"
     FINANCE = "finance"
     SECRETARY = "secretary"
+    SUPPORTING_STAFF = "supporting_staff"
     PARENT = "parent"
     STUDENT = "student"
 

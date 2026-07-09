@@ -305,6 +305,9 @@ async def get_current_user(
         "school_id": school_id,
         "email": user.get("email"),
         "full_name": user.get("full_name"),
+        "student_id": user.get("student_id"),
+        "admission_number": user.get("admission_number"),
+        "student_access_code": user.get("student_access_code"),
     }
 
 # =========================
