@@ -49,3 +49,35 @@ def test_upload_storage_usage_can_be_scoped_to_school(tmp_path, monkeypatch):
 
     assert scoped["files"] == 1
     assert total["files"] == 1
+
+
+def test_diagnostic_from_error_includes_review_notes():
+    diagnostic = platform.diagnostic_from_error(
+        {
+            "id": "error-1",
+            "action": "frontend_error",
+            "school_id": "school-1",
+            "performed_by": "admin@example.com",
+            "timestamp": "2026-07-09T10:00:00+00:00",
+            "metadata": {
+                "message": "Failed request",
+                "severity": "high",
+                "route": "/payments",
+                "affected_file": "FeesPage.js",
+                "stack_trace": "Error: Failed request",
+                "suggested_fix": "Validate payment payload",
+            },
+        },
+        {
+            "status": "reviewed",
+            "fix_notes": "Payload validation added",
+            "reviewed_by": "owner@example.com",
+        },
+    )
+
+    assert diagnostic["source_id"] == "error-1"
+    assert diagnostic["status"] == "reviewed"
+    assert diagnostic["severity"] == "high"
+    assert diagnostic["route_or_component"] == "/payments"
+    assert diagnostic["affected_file"] == "FeesPage.js"
+    assert diagnostic["fix_notes"] == "Payload validation added"
