@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
 import {
   Card,
   CardContent,
@@ -14,7 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
 import {
   Select,
   SelectContent,
@@ -22,109 +20,95 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-import { toast } from "sonner";
-import {
-  GraduationCap,
-  AlertCircle,
-  CheckCircle,
-} from "lucide-react";
-
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CheckCircle, GraduationCap } from "lucide-react";
+import { toast } from "sonner";
+
+const initialForm = {
+  name: "",
+  email: "",
+  address: "",
+  phone: "",
+  admin_name: "",
+  admin_email: "",
+  admin_phone: "",
+  school_type: "",
+  school_classification: "",
+  admin_password: "",
+};
 
 const RegisterPage = () => {
   const navigate = useNavigate();
-
-  const [formData, setFormData] = useState({
-    name: "",
-    address: "",
-    phone: "",
-    email: "",
-    school_type: "",
-    school_classification: "",
-    operation_type: "day",
-    logo_url: "",
-    banner_url: "",
-    theme_primary: "#10B981",
-    theme_secondary: "#0F172A",
-    motto: "",
-    vision: "",
-    mission: "",
-    website: "",
-    principal_name: "",
-    principal_email: "",
-    principal_phone: "",
-    school_registration_number: "",
-    ministry_registration_number: "",
-    kra_pin: "",
-    admin_name: "",
-    admin_email: "",
-    admin_phone: "",
-  });
-
+  const [formData, setFormData] = useState(initialForm);
   const [loading, setLoading] = useState(false);
   const [registrationSummary, setRegistrationSummary] = useState(null);
-  const [registered, setRegistered] = useState(false);
 
   const updateField = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const validateForm = () => {
+    const required = [
+      ["name", "School Name"],
+      ["email", "School Email"],
+      ["address", "Physical Address"],
+      ["phone", "School Phone Number"],
+      ["admin_name", "Admin Name"],
+      ["admin_email", "Admin Email"],
+      ["admin_phone", "Admin Phone Number"],
+      ["school_type", "Level of School"],
+      ["school_classification", "Category of School"],
+      ["admin_password", "School admin password"],
+    ];
 
-    if (!formData.school_type) {
-      toast.error("Please select school type");
-      return;
+    for (const [field, label] of required) {
+      if (!String(formData[field] || "").trim()) {
+        toast.error(`${label} is required`);
+        return false;
+      }
     }
 
-    if (!formData.school_classification) {
-      toast.error("Please select school classification");
-      return;
-    }
+    return true;
+  };
 
-    if (!formData.operation_type) {
-      toast.error("Please select school operation type");
-      return;
-    }
-
-    if (!formData.admin_email) {
-      toast.error("Admin email is required");
-      return;
-    }
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validateForm()) return;
 
     setLoading(true);
 
     try {
       const payload = {
-        ...formData,
-        email: formData.email?.trim().toLowerCase(),
-        admin_email: formData.admin_email?.trim().toLowerCase(),
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        address: formData.address.trim(),
+        phone: formData.phone.trim(),
+        school_type: formData.school_type,
+        school_classification: formData.school_classification,
+        operation_type: "day",
+        admin_name: formData.admin_name.trim(),
+        admin_email: formData.admin_email.trim().toLowerCase(),
+        admin_phone: formData.admin_phone.trim(),
+        admin_password: formData.admin_password,
+        declarations_confirmed: true,
       };
 
-      const response = await apiClient.post(
-        "/auth/register-school",
-        payload
-      );
-
+      const response = await apiClient.post("/auth/register-school", payload);
       const data = response?.data || {};
 
       setRegistrationSummary({
-        schoolName: data.school_name || formData.name,
-        invoiceNumber: data.installation_invoice?.invoice_number || "",
-        installationFee: data.installation_invoice?.amount || 5000,
+        schoolName: data.school_name || payload.name,
+        schoolCode: data.school_code || "",
         approvalStatus: data.approval_status || "pending",
         paymentStatus: data.payment_status || "pending",
+        installationFee: data.installation_invoice?.amount || 5000,
       });
-      setRegistered(true);
-
-      toast.success("School registered. Installation payment and approval are required before login.");
+      setFormData(initialForm);
+      toast.success("School registration submitted successfully");
     } catch (error) {
       toast.error(
         error?.response?.data?.detail ||
+          error?.response?.data?.message ||
           error?.message ||
           "Registration failed"
       );
@@ -134,369 +118,136 @@ const RegisterPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-6">
-      <Card className="w-full max-w-2xl bg-[#1A2332] border-[#1E3A4F]/40">
+    <div className="min-h-screen bg-[#070B14] px-6 py-10 text-white">
+      <div className="mx-auto max-w-3xl">
+        <Button variant="outline" onClick={() => navigate("/")} className="mb-6">
+          Back to Home
+        </Button>
 
-        <CardHeader className="text-center space-y-4">
-          <div className="mx-auto w-16 h-16 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
-            <GraduationCap className="w-10 h-10 text-white" />
-          </div>
+        <Card className="bg-[#101827] border-white/10">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto w-16 h-16 bg-emerald-500/15 border border-emerald-400/30 rounded-xl flex items-center justify-center">
+              <GraduationCap className="w-9 h-9 text-emerald-300" />
+            </div>
+            <CardTitle className="text-3xl font-bold text-white">
+              School Registration
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              Submit your school details. Support will review and approve access after installation payment.
+            </CardDescription>
+          </CardHeader>
 
-          <CardTitle className="text-3xl font-bold text-white">
-            School Administrator Registration
-          </CardTitle>
-
-          <CardDescription className="text-slate-400 mt-2">
-            Only school administrators can create a school account
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-
-          {registered && (
-            <Alert className="mb-6 border-emerald-500/20 bg-emerald-500/10">
-              <CheckCircle className="h-4 w-4 text-emerald-400" />
-
-              <AlertDescription className="text-emerald-200 space-y-4">
-
-                <div className="font-semibold text-lg">
-                  School Registered Successfully - Pending Approval
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
-                    <div className="text-slate-300">School</div>
-                    <div className="text-white font-medium">{registrationSummary?.schoolName}</div>
+          <CardContent>
+            {registrationSummary && (
+              <Alert className="mb-6 border-emerald-500/30 bg-emerald-500/10">
+                <CheckCircle className="h-4 w-4 text-emerald-300" />
+                <AlertDescription className="text-slate-200 space-y-4">
+                  <div>
+                    <p className="text-lg font-semibold text-white">
+                      Your school registration has been submitted successfully.
+                    </p>
+                    <p className="mt-2">
+                      Please pay the installation fee of <strong>KES 5,000</strong> to{" "}
+                      <strong>+254702641920</strong> and wait for the support team to approve your school.
+                    </p>
                   </div>
-                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
-                    <div className="text-slate-300">Installation Invoice</div>
-                    <div className="text-white font-medium">{registrationSummary?.invoiceNumber || "Generated"}</div>
+
+                  <div className="rounded-lg border border-white/10 bg-[#070B14] p-4">
+                    <p className="text-sm text-slate-400">Generated School Code</p>
+                    <p className="mt-1 text-2xl font-bold tracking-wide text-emerald-300">
+                      {registrationSummary.schoolCode}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      This School Code is for other school users when they join or sign in. The school admin should use the admin email and password submitted above after approval.
+                    </p>
                   </div>
-                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
-                    <div className="text-slate-300">Installation Fee</div>
-                    <div className="text-white font-medium">KES {Number(registrationSummary?.installationFee || 5000).toLocaleString()}</div>
-                  </div>
-                  <div className="rounded-lg border border-emerald-500/20 bg-slate-950/40 p-3">
-                    <div className="text-slate-300">Current Status</div>
-                    <div className="text-white font-medium capitalize">
-                      Payment {registrationSummary?.paymentStatus} | Approval {registrationSummary?.approvalStatus}
-                    </div>
-                  </div>
-                </div>
+                </AlertDescription>
+              </Alert>
+            )}
 
-                <div className="text-sm mt-2 text-slate-300">
-                  School code, login link, username and temporary password will be available inside the School Admin Dashboard after payment and platform approval.
-                </div>
-
-                <Button
-                  className="w-full mt-4"
-                  onClick={() => navigate("/login")}
-                >
-                  Continue To Login
-                </Button>
-
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <Alert className="mb-6 border-emerald-500/20 bg-emerald-500/10">
-            <AlertCircle className="h-4 w-4 text-emerald-400" />
-
-            <AlertDescription className="text-emerald-300">
-              Installation Fee: KES 5,000 | Monthly: KES 2,000 per school
-            </AlertDescription>
-          </Alert>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg text-white">
-                School Information
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
                   <Label>School Name</Label>
-                  <Input
-                    value={formData.name}
-                    onChange={(e) => updateField("name", e.target.value)}
-                    required
-                  />
+                  <Input value={formData.name} onChange={(e) => updateField("name", e.target.value)} required />
                 </div>
 
-                <div>
-                  <Label>School Type</Label>
+                <div className="space-y-2">
+                  <Label>School Email</Label>
+                  <Input type="email" value={formData.email} onChange={(e) => updateField("email", e.target.value)} required />
+                </div>
 
-                  <Select
-                    value={formData.school_type}
-                    onValueChange={(value) =>
-                      updateField("school_type", value)
-                    }
-                  >
+                <div className="space-y-2">
+                  <Label>School Phone Number</Label>
+                  <Input value={formData.phone} onChange={(e) => updateField("phone", e.target.value)} required />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Level of School</Label>
+                  <Select value={formData.school_type} onValueChange={(value) => updateField("school_type", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select school type" />
+                      <SelectValue placeholder="Select level" />
                     </SelectTrigger>
-
                     <SelectContent>
                       <SelectItem value="primary">Primary</SelectItem>
                       <SelectItem value="junior_secondary">Junior Secondary</SelectItem>
                       <SelectItem value="senior_secondary">Senior Secondary</SelectItem>
+                      <SelectItem value="secondary">Secondary</SelectItem>
                       <SelectItem value="college">College</SelectItem>
-                      <SelectItem value="university">University</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>School Classification</Label>
-                  <Select
-                    value={formData.school_classification}
-                    onValueChange={(value) =>
-                      updateField("school_classification", value)
-                    }
-                  >
+                <div className="space-y-2">
+                  <Label>Category of School</Label>
+                  <Select value={formData.school_classification} onValueChange={(value) => updateField("school_classification", value)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select classification" />
+                      <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="public">Public</SelectItem>
                       <SelectItem value="private">Private</SelectItem>
+                      <SelectItem value="faith_based">Faith Based</SelectItem>
                       <SelectItem value="international">International</SelectItem>
                       <SelectItem value="special">Special School</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div>
-                  <Label>Operation Type</Label>
-                  <Select
-                    value={formData.operation_type}
-                    onValueChange={(value) =>
-                      updateField("operation_type", value)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select operation type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="day">Day School</SelectItem>
-                      <SelectItem value="boarding">Boarding School</SelectItem>
-                      <SelectItem value="mixed">Mixed Day & Boarding</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>School Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => updateField("email", e.target.value)}
-                    required
-                  />
+                <div className="space-y-2">
+                  <Label>Admin Name</Label>
+                  <Input value={formData.admin_name} onChange={(e) => updateField("admin_name", e.target.value)} required />
                 </div>
 
-                <div>
-                  <Label>School Phone</Label>
-                  <Input
-                    value={formData.phone}
-                    onChange={(e) => updateField("phone", e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Physical Address</Label>
-                <Textarea
-                  value={formData.address}
-                  onChange={(e) => updateField("address", e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Logo URL</Label>
-                  <Input
-                    type="url"
-                    value={formData.logo_url}
-                    onChange={(e) => updateField("logo_url", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Banner URL</Label>
-                  <Input
-                    type="url"
-                    value={formData.banner_url}
-                    onChange={(e) => updateField("banner_url", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Primary Theme Color</Label>
-                  <Input
-                    type="color"
-                    value={formData.theme_primary}
-                    onChange={(e) => updateField("theme_primary", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Secondary Theme Color</Label>
-                  <Input
-                    type="color"
-                    value={formData.theme_secondary}
-                    onChange={(e) => updateField("theme_secondary", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>School Motto</Label>
-                  <Input
-                    value={formData.motto}
-                    onChange={(e) => updateField("motto", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Website</Label>
-                  <Input
-                    value={formData.website}
-                    onChange={(e) => updateField("website", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>School Registration Number</Label>
-                  <Input
-                    value={formData.school_registration_number}
-                    onChange={(e) =>
-                      updateField("school_registration_number", e.target.value)
-                    }
-                  />
-                </div>
-
-                <div>
-                  <Label>Ministry Registration Number</Label>
-                  <Input
-                    value={formData.ministry_registration_number}
-                    onChange={(e) =>
-                      updateField("ministry_registration_number", e.target.value)
-                    }
-                  />
-                </div>
-
-                <div>
-                  <Label>KRA PIN</Label>
-                  <Input
-                    value={formData.kra_pin}
-                    onChange={(e) => updateField("kra_pin", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Principal Name</Label>
-                  <Input
-                    value={formData.principal_name}
-                    onChange={(e) => updateField("principal_name", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Principal Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.principal_email}
-                    onChange={(e) => updateField("principal_email", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Principal Phone</Label>
-                  <Input
-                    value={formData.principal_phone}
-                    onChange={(e) => updateField("principal_phone", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Vision</Label>
-                  <Textarea
-                    value={formData.vision}
-                    onChange={(e) => updateField("vision", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Mission</Label>
-                  <Textarea
-                    value={formData.mission}
-                    onChange={(e) => updateField("mission", e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg text-white">
-                School Admin Account
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Admin Full Name</Label>
-                  <Input
-                    value={formData.admin_name}
-                    onChange={(e) => updateField("admin_name", e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div>
+                <div className="space-y-2">
                   <Label>Admin Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.admin_email}
-                    onChange={(e) => updateField("admin_email", e.target.value)}
-                    required
-                  />
+                  <Input type="email" value={formData.admin_email} onChange={(e) => updateField("admin_email", e.target.value)} required />
                 </div>
 
-                <div>
-                  <Label>Admin Phone</Label>
-                  <Input
-                    value={formData.admin_phone}
-                    onChange={(e) => updateField("admin_phone", e.target.value)}
-                  />
+                <div className="space-y-2">
+                  <Label>Admin Phone Number</Label>
+                  <Input value={formData.admin_phone} onChange={(e) => updateField("admin_phone", e.target.value)} required />
                 </div>
 
-                <div>
-                  <Label>Temporary Password</Label>
-                  <Input value="Generated automatically after submission" readOnly />
+                <div className="space-y-2">
+                  <Label>School Admin Password</Label>
+                  <Input type="password" value={formData.admin_password} onChange={(e) => updateField("admin_password", e.target.value)} required />
                 </div>
               </div>
-            </div>
 
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Registering..." : "Register School"}
-            </Button>
+              <div className="space-y-2">
+                <Label>Physical Address</Label>
+                <Textarea value={formData.address} onChange={(e) => updateField("address", e.target.value)} required />
+              </div>
 
-          </form>
-
-        </CardContent>
-      </Card>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Submitting..." : "Submit School Registration"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

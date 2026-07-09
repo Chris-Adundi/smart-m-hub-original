@@ -10,6 +10,8 @@ The deployment owner should provide:
 - Super admin dashboard link, for platform-owner testers only
 - Support or feedback channel
 
+For Cloudflare tunnel tests, the deployment owner must provide a public backend API URL and configure the school frontend with that URL. If the frontend still points to `127.0.0.1`, testers outside the host machine will see registration failures.
+
 ## How to Register a School
 
 1. Open the school portal link.

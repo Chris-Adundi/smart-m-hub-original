@@ -94,6 +94,31 @@ Use separate public domains, for example:
 10. Approve that school from the super admin dashboard.
 11. Test each role from different browsers/devices.
 
+## Cloudflare Tunnel Beta Testing
+
+If testers access the school frontend through a Cloudflare tunnel, the browser is running on the tester's device. Do not let the frontend call `http://127.0.0.1:8000`, because that points to the tester's own device, not your backend.
+
+Use two public URLs:
+
+- One tunnel/domain for the backend API.
+- One tunnel/domain for the school frontend.
+
+Backend environment:
+
+```env
+FRONTEND_URL=https://your-school-frontend.trycloudflare.com
+ALLOWED_ORIGINS=https://your-school-frontend.trycloudflare.com
+ALLOW_CLOUDFLARE_TUNNEL=true
+```
+
+School frontend environment before starting/building:
+
+```env
+REACT_APP_BACKEND_URL=https://your-backend-api.trycloudflare.com
+```
+
+Then restart the frontend process so React picks up the environment variable.
+
 ## Beta Safety Checklist
 
 - `APP_ENV=production` is set on the backend.

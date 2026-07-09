@@ -97,6 +97,15 @@ UPLOAD_ROOT = ROOT_DIR / "uploads"
 UPLOAD_ROOT.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
+def parse_allowed_origin_regex():
+    configured = os.getenv("ALLOWED_ORIGIN_REGEX") or os.getenv("CORS_ORIGIN_REGEX")
+    if configured:
+        return configured
+    if str(os.getenv("ALLOW_CLOUDFLARE_TUNNEL", "")).lower() in {"1", "true", "yes"}:
+        return r"https://.*\.trycloudflare\.com"
+    return None
+
+
 def parse_allowed_origins():
     configured = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
     if configured:
@@ -114,6 +123,7 @@ def parse_allowed_origins():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=parse_allowed_origins(),
+    allow_origin_regex=parse_allowed_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2043,7 +2053,7 @@ async def resolve_school_code(school_code: str):
 
 
 @api_router.post("/auth/register-school")
-async def register_school(payload: RegisterSchoolRequest):
+async def register_school(payload: RegisterSchoolRequest, request: Request):
 
     try:
 
@@ -2105,7 +2115,7 @@ async def register_school(payload: RegisterSchoolRequest):
 
         join_slug = f"{clean_slug(payload.name)}-{invite_code}"
 
-        frontend_url = get_frontend_url()
+        frontend_url = (os.getenv("FRONTEND_URL") or request.headers.get("origin") or get_frontend_url()).rstrip("/")
         invite_link = f"{frontend_url}/join/{join_slug}"
         login_link = f"{frontend_url}/login?school={school_code}"
 

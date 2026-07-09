@@ -52,7 +52,7 @@ export default function LandingPage() {
           </button>
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => navigate("/login")}>Login</Button>
-            <Button onClick={() => navigate("/setup-school")}>Register School</Button>
+            <Button onClick={() => navigate("/register")}>Register School</Button>
           </div>
         </div>
       </header>
@@ -71,7 +71,7 @@ export default function LandingPage() {
                 Simplify school administration, academics, finance, communication and student services in one secure, easy-to-use space.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button onClick={() => navigate("/setup-school")} className="gap-2">
+                <Button onClick={() => navigate("/register")} className="gap-2">
                   Register Your School <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button variant="outline" onClick={() => navigate("/login")}>Access Portal</Button>

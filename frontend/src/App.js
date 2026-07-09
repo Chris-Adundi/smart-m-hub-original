@@ -445,7 +445,7 @@ function App() {
           {/* SCHOOL SETUP */}
           <Route
             path="/setup-school"
-            element={<SchoolProfilePage />}
+            element={<RegisterPage />}
           />
 
           {/* JOIN SCHOOL */}
