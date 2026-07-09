@@ -92,6 +92,11 @@ export async function approveSchool(id) {
   return data;
 }
 
+export async function rejectSchool(id) {
+  const { data } = await api.patch(`/schools/${encodeURIComponent(id)}/reject`);
+  return data;
+}
+
 export async function suspendSchool(id) {
   const { data } = await api.patch(`/schools/${encodeURIComponent(id)}/suspend`);
   return data;

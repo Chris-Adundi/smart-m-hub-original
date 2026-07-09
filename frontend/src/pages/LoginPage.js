@@ -105,6 +105,8 @@ const normalizeRole = (role) => {
   return roleMap[r] || "";
 };
 
+const SCHOOL_CODE_PATTERN = /^(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})$/;
+
 // ========================================
 // REDIRECT HANDLER
 // ========================================
@@ -222,7 +224,7 @@ const selectedRoleData = roles.find(
   useEffect(() => {
     const schoolCode = formData.school_code.trim().toUpperCase();
 
-    if (!/^SMH-KE-\d{6}$/.test(schoolCode)) {
+    if (!SCHOOL_CODE_PATTERN.test(schoolCode)) {
       setResolvedSchool(null);
       return;
     }
@@ -278,9 +280,9 @@ const selectedRoleData = roles.find(
 
     if (
       finalRole !== "super_admin" &&
-      !/^SMH-KE-\d{6}$/.test(formData.school_code.trim().toUpperCase())
+      !SCHOOL_CODE_PATTERN.test(formData.school_code.trim().toUpperCase())
     ) {
-      toast.error("Enter a valid school code, for example SMH-KE-000021");
+      toast.error("Enter a valid school code, for example SMH-AB12CD34EF");
       return;
     }
 

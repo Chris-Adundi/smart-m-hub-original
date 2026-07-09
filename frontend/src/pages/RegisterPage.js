@@ -42,6 +42,9 @@ const RegisterPage = () => {
   const [formData, setFormData] = useState(initialForm);
   const [loading, setLoading] = useState(false);
   const [registrationSummary, setRegistrationSummary] = useState(null);
+  const [paymentPhone, setPaymentPhone] = useState("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentSubmitted, setPaymentSubmitted] = useState(false);
 
   const updateField = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -97,6 +100,7 @@ const RegisterPage = () => {
       const data = response?.data || {};
 
       setRegistrationSummary({
+        schoolId: data.school_id || "",
         schoolName: data.school_name || payload.name,
         schoolCode: data.school_code || "",
         approvalStatus: data.approval_status || "pending",
@@ -116,6 +120,128 @@ const RegisterPage = () => {
       setLoading(false);
     }
   };
+
+  const handlePaymentSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!registrationSummary?.schoolId || !registrationSummary?.schoolCode) {
+      toast.error("School registration reference is missing. Please register again.");
+      return;
+    }
+
+    if (!paymentPhone.trim()) {
+      toast.error("Enter the phone number used to make payment");
+      return;
+    }
+
+    setPaymentLoading(true);
+
+    try {
+      await apiClient.post("/auth/register-school/payment-phone", {
+        school_id: registrationSummary.schoolId,
+        school_code: registrationSummary.schoolCode,
+        payment_phone: paymentPhone.trim(),
+      });
+      setPaymentSubmitted(true);
+      toast.success("Payment phone submitted for verification");
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.detail ||
+          error?.response?.data?.message ||
+          error?.message ||
+          "Payment submission failed"
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  if (registrationSummary) {
+    return (
+      <div className="min-h-screen bg-[#070B14] px-6 py-10 text-white">
+        <div className="mx-auto max-w-3xl">
+          <Button variant="outline" onClick={() => navigate("/")} className="mb-6">
+            Back to Home
+          </Button>
+
+          <Card className="bg-[#101827] border-white/10">
+            <CardHeader className="text-center space-y-4">
+              <div className="mx-auto w-16 h-16 bg-emerald-500/15 border border-emerald-400/30 rounded-xl flex items-center justify-center">
+                <CheckCircle className="w-9 h-9 text-emerald-300" />
+              </div>
+              <CardTitle className="text-3xl font-bold text-white">
+                School registration submitted successfully.
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                Complete the installation payment step so support can verify and approve your school.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-5">
+                <p className="text-sm text-slate-300">School Code</p>
+                <p className="mt-2 text-3xl font-bold tracking-wide text-emerald-300">
+                  {registrationSummary.schoolCode}
+                </p>
+                <p className="mt-3 text-sm text-slate-300">
+                  Copy this code. It will be used for your school login and for authorized school users.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-[#070B14] p-5">
+                <h2 className="text-xl font-semibold text-white">Installation Payment</h2>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-lg border border-white/10 bg-[#101827] p-4">
+                    <p className="text-sm text-slate-400">Installation fee</p>
+                    <p className="mt-1 text-2xl font-bold text-white">
+                      KES {Number(registrationSummary.installationFee || 5000).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-[#101827] p-4">
+                    <p className="text-sm text-slate-400">Payment number</p>
+                    <p className="mt-1 text-2xl font-bold text-white">+254702641920</p>
+                  </div>
+                </div>
+
+                {paymentSubmitted ? (
+                  <Alert className="mt-5 border-emerald-500/30 bg-emerald-500/10">
+                    <CheckCircle className="h-4 w-4 text-emerald-300" />
+                    <AlertDescription className="text-slate-200">
+                      Your payment is being verified. The support team will approve your school soon.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <form onSubmit={handlePaymentSubmit} className="mt-5 space-y-4">
+                    <div className="space-y-2">
+                      <Label>Phone number used to make payment</Label>
+                      <Input
+                        value={paymentPhone}
+                        onChange={(event) => setPaymentPhone(event.target.value)}
+                        placeholder="+254..."
+                        required
+                      />
+                    </div>
+                    <Button type="submit" className="w-full" disabled={paymentLoading}>
+                      {paymentLoading ? "Submitting..." : "Submit Payment Phone"}
+                    </Button>
+                  </form>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button variant="outline" onClick={() => navigate("/login")} className="flex-1">
+                  Access Portal
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/")} className="flex-1">
+                  Return Home
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#070B14] px-6 py-10 text-white">
@@ -138,33 +264,6 @@ const RegisterPage = () => {
           </CardHeader>
 
           <CardContent>
-            {registrationSummary && (
-              <Alert className="mb-6 border-emerald-500/30 bg-emerald-500/10">
-                <CheckCircle className="h-4 w-4 text-emerald-300" />
-                <AlertDescription className="text-slate-200 space-y-4">
-                  <div>
-                    <p className="text-lg font-semibold text-white">
-                      Your school registration has been submitted successfully.
-                    </p>
-                    <p className="mt-2">
-                      Please pay the installation fee of <strong>KES 5,000</strong> to{" "}
-                      <strong>+254702641920</strong> and wait for the support team to approve your school.
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-white/10 bg-[#070B14] p-4">
-                    <p className="text-sm text-slate-400">Generated School Code</p>
-                    <p className="mt-1 text-2xl font-bold tracking-wide text-emerald-300">
-                      {registrationSummary.schoolCode}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-400">
-                      This School Code is for other school users when they join or sign in. The school admin should use the admin email and password submitted above after approval.
-                    </p>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">

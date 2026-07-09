@@ -235,11 +235,14 @@ async def serialize_school(school: dict):
         "school_type": school.get("school_type"),
         "administrator": admin.get("full_name") if admin else school.get("principal_name"),
         "administrator_email": admin.get("email") if admin else school.get("principal_email"),
+        "administrator_phone": admin.get("phone") if admin else school.get("principal_phone"),
         "current_subscription": school.get("subscription_plan") or "standard",
         "subscription_status": school.get("subscription_status") or "inactive",
         "registration_date": school.get("created_at"),
         "last_login": max([u.get("last_login") for u in users if u.get("last_login")] or [None]),
         "payment_status": school.get("payment_status") or "pending",
+        "payment_phone_number": school.get("payment_phone_number") or school.get("registration_payment_phone"),
+        "payment_verification_status": school.get("payment_verification_status") or "awaiting_payment_phone",
         "school_status": school.get("status") or ("active" if school.get("is_active") else "inactive"),
         "approval_status": school.get("approval_status") or "pending",
         "is_active": bool(school.get("is_active", False)),
@@ -422,6 +425,7 @@ async def approve_school(school_id: str, user=Depends(require_super_admin)):
             "is_active": True,
             "subscription_status": "active",
             "payment_status": "paid",
+            "payment_verification_status": "verified",
             "approved_at": now,
             "approved_by": user.get("user_id"),
             "updated_at": now,
@@ -429,7 +433,7 @@ async def approve_school(school_id: str, user=Depends(require_super_admin)):
     )
     await db.users.update_many(
         {"school_id": canonical_id},
-        {"$set": {"approval_status": "approved", "is_active": True, "updated_at": now}}
+        {"$set": {"approval_status": "approved", "is_active": True, "is_suspended": False, "updated_at": now}}
     )
     await db.platform_invoices.update_many(
         {"school_id": canonical_id, "invoice_type": "installation"},
@@ -437,6 +441,34 @@ async def approve_school(school_id: str, user=Depends(require_super_admin)):
     )
     await log_action("school_approved", user, canonical_id)
     return {"message": "School and users approved successfully"}
+
+
+@router.patch("/schools/{school_id}/reject")
+async def reject_school(school_id: str, user=Depends(require_super_admin)):
+    school = await db.schools.find_one(school_lookup(school_id))
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    canonical_id = str(school.get("id") or school_id)
+    now = now_iso()
+    await db.schools.update_one(
+        {"_id": school["_id"]},
+        {"$set": {
+            "approval_status": "rejected",
+            "status": "rejected",
+            "is_active": False,
+            "subscription_status": "inactive",
+            "payment_status": school.get("payment_status") or "pending",
+            "rejected_at": now,
+            "rejected_by": user.get("user_id"),
+            "updated_at": now,
+        }}
+    )
+    await db.users.update_many(
+        {"school_id": canonical_id},
+        {"$set": {"approval_status": "rejected", "is_active": False, "updated_at": now}}
+    )
+    await log_action("school_rejected", user, canonical_id)
+    return {"message": "School registration rejected"}
 
 
 @router.patch("/schools/{school_id}/suspend")

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { activateSchool, approveSchool, getSchools, suspendSchool } from "../api/platformApi";
+import { activateSchool, approveSchool, getSchools, rejectSchool, suspendSchool } from "../api/platformApi";
 
 const normalizeSchools = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -39,7 +39,16 @@ export default function Approvals() {
       .filter((school) => status === "all" || (school.approval_status || "pending") === status)
       .filter((school) => {
         if (!needle) return true;
-        return [school.name, school.school_code, school.administrator, school.administrator_email, school.payment_status]
+        return [
+          school.name,
+          school.school_code,
+          school.administrator,
+          school.administrator_email,
+          school.administrator_phone,
+          school.payment_status,
+          school.payment_phone_number,
+          school.payment_verification_status,
+        ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(needle));
       });
@@ -56,6 +65,7 @@ export default function Approvals() {
     setError("");
     try {
       if (action === "approve") await approveSchool(school.id);
+      if (action === "reject") await rejectSchool(school.id);
       if (action === "activate") await activateSchool(school.id);
       if (action === "suspend") await suspendSchool(school.id);
       await load();
@@ -113,6 +123,7 @@ export default function Approvals() {
                   <th style={thStyle}>Administrator</th>
                   <th style={thStyle}>Subscription</th>
                   <th style={thStyle}>Payment</th>
+                  <th style={thStyle}>Verification</th>
                   <th style={thStyle}>Status</th>
                   <th style={thStyle}>Actions</th>
                 </tr>
@@ -127,15 +138,25 @@ export default function Approvals() {
                     <td style={tdStyle}>
                       <strong>{school.administrator || "Administrator pending"}</strong>
                       <span style={mutedStyle}>{school.administrator_email || school.email || "No email"}</span>
+                      <span style={mutedStyle}>{school.administrator_phone || "No phone"}</span>
                     </td>
                     <td style={tdStyle}>{school.current_subscription || "standard"}</td>
-                    <td style={tdStyle}><Badge value={school.payment_status || "pending"} /></td>
+                    <td style={tdStyle}>
+                      <Badge value={school.payment_status || "pending"} />
+                      <span style={mutedStyle}>{school.payment_phone_number || "No payment phone submitted"}</span>
+                    </td>
+                    <td style={tdStyle}><Badge value={school.payment_verification_status || "awaiting_payment_phone"} /></td>
                     <td style={tdStyle}><Badge value={school.approval_status || "pending"} /></td>
                     <td style={actionCellStyle}>
                       <Link style={linkButtonStyle} to={`/schools/${school.id}`}>View</Link>
                       {school.approval_status !== "approved" && (
                         <button style={buttonStyle} onClick={() => runAction(school, "approve")} disabled={busyId === school.id}>
                           {busyId === school.id ? "Working..." : "Approve"}
+                        </button>
+                      )}
+                      {school.approval_status === "pending" && (
+                        <button style={dangerButtonStyle} onClick={() => runAction(school, "reject")} disabled={busyId === school.id}>
+                          Reject
                         </button>
                       )}
                       {school.school_status === "suspended" ? (

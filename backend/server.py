@@ -106,11 +106,13 @@ def parse_allowed_origin_regex():
     return None
 
 
-def parse_allowed_origins():
+def parse_allowed_origins(allowed_origin_regex: Optional[str] = None):
     configured = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
     if configured:
         return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
     if APP_ENV in {"production", "prod"}:
+        if allowed_origin_regex:
+            return []
         raise RuntimeError("ALLOWED_ORIGINS or CORS_ORIGINS must be set in production")
     return [
         "http://localhost:5173",
@@ -120,10 +122,12 @@ def parse_allowed_origins():
     ]
 
 
+allowed_origin_regex = parse_allowed_origin_regex()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=parse_allowed_origins(),
-    allow_origin_regex=parse_allowed_origin_regex(),
+    allow_origins=parse_allowed_origins(allowed_origin_regex),
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -375,24 +379,22 @@ def generate_school_slug(name: str) -> str:
 
 async def generate_school_code() -> str:
     """
-    Allocate a human-readable school code from an atomic MongoDB counter.
-    The existence check keeps this compatible with schools created before
-    the counter was introduced.
+    Allocate a non-guessable public school code.
+
+    Legacy sequential codes remain supported by lookup endpoints, but new
+    registrations must not reveal school volume or registration order.
     """
-    while True:
-        counter = await db.counters.find_one_and_update(
-            {"_id": "school_code"},
-            {"$inc": {"sequence": 1}},
-            upsert=True,
-            return_document=ReturnDocument.AFTER
-        )
-        school_code = f"SMH-KE-{int(counter['sequence']):06d}"
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(25):
+        code_body = "".join(secrets.choice(alphabet) for _ in range(10))
+        school_code = f"SMH-{code_body}"
 
         if not await db.schools.find_one(
             {"school_code": school_code},
             {"_id": 1}
         ):
             return school_code
+    raise HTTPException(status_code=500, detail="Unable to generate unique school code")
 
 
 def generate_invite_code() -> str:
@@ -612,6 +614,12 @@ class RegisterSchoolRequest(BaseModel):
     admin_national_id: Optional[str] = None
     admin_role: Optional[str] = "School Administrator"
     declarations_confirmed: Optional[bool] = False
+
+
+class RegistrationPaymentPhoneRequest(BaseModel):
+    school_id: str
+    school_code: str
+    payment_phone: str
 
 
 class JoinSchoolRequest(BaseModel):
@@ -2033,7 +2041,7 @@ async def deactivate_school_user(
 async def resolve_school_code(school_code: str):
     normalized_code = str(school_code or "").strip().upper()
 
-    if not re.fullmatch(r"SMH-KE-\d{6}", normalized_code):
+    if not re.fullmatch(r"(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})", normalized_code):
         raise HTTPException(status_code=400, detail="Invalid school code format")
 
     school = await db.schools.find_one({
@@ -2062,23 +2070,33 @@ async def register_school(payload: RegisterSchoolRequest, request: Request):
         # =========================
         school_email = payload.email.lower().strip()
         admin_email = payload.admin_email.lower().strip()
+        school_phone = str(payload.phone or "").strip()
+        admin_phone = str(payload.admin_phone or "").strip()
 
         # =========================
         # DUPLICATE CHECKS (SAFE)
         # =========================
-        existing_school = await db.schools.find_one({
-            "email": school_email
-        })
+        existing_school = await db.schools.find_one({"email": school_email})
 
         if existing_school:
-            raise HTTPException(status_code=400, detail="School already exists")
+            raise HTTPException(status_code=400, detail="A school with this email is already registered")
+
+        existing_school_phone = await db.schools.find_one({"phone": school_phone})
+
+        if existing_school_phone:
+            raise HTTPException(status_code=400, detail="A school with this phone number is already registered")
 
         existing_admin = await db.users.find_one({
             "email": admin_email
         })
 
         if existing_admin:
-            raise HTTPException(status_code=400, detail="Admin email already exists")
+            raise HTTPException(status_code=400, detail="An administrator with this email already exists")
+
+        if admin_phone:
+            existing_admin_phone = await db.users.find_one({"phone": admin_phone})
+            if existing_admin_phone:
+                raise HTTPException(status_code=400, detail="An administrator with this phone number already exists")
 
         # =========================
         # IDENTITY HELPERS
@@ -2152,7 +2170,7 @@ async def register_school(payload: RegisterSchoolRequest, request: Request):
             "login_link": login_link,
 
             "address": payload.address,
-            "phone": payload.phone,
+            "phone": school_phone,
             "email": school_email,
             "school_type": payload.school_type,
             "school_classification": payload.school_classification,
@@ -2196,6 +2214,8 @@ async def register_school(payload: RegisterSchoolRequest, request: Request):
             "billing_day": billing_day,
             "installation_fee": 5000,
             "payment_status": "pending",
+            "payment_verification_status": "awaiting_payment_phone",
+            "registration_payment_phone": None,
 
             "blocked_users": [],
 
@@ -2218,7 +2238,7 @@ async def register_school(payload: RegisterSchoolRequest, request: Request):
             "id": admin_id,
             "full_name": payload.admin_name,
             "email": admin_email,
-            "phone": payload.admin_phone,
+            "phone": admin_phone or None,
 
             "password_hash": hash_password(temporary_password),
 
@@ -2340,8 +2360,61 @@ async def register_school(payload: RegisterSchoolRequest, request: Request):
 # ✅ ADD THIS BELOW (THIS IS THE FIX YOU NEEDED)
 # ─────────────────────────────────────────────
 
-from fastapi import HTTPException
-import uuid
+@api_router.post("/auth/register-school/payment-phone")
+async def submit_registration_payment_phone(payload: RegistrationPaymentPhoneRequest, request: Request):
+    school_id = str(payload.school_id or "").strip()
+    school_code = str(payload.school_code or "").strip().upper()
+    payment_phone = str(payload.payment_phone or "").strip()
+
+    if not school_id or not school_code:
+        raise HTTPException(status_code=400, detail="School registration reference is required")
+
+    if not re.fullmatch(r"\+?\d[\d\s-]{7,18}", payment_phone):
+        raise HTTPException(status_code=400, detail="Enter the phone number used to make payment")
+
+    school = await db.schools.find_one({"id": school_id, "school_code": school_code})
+    if not school:
+        raise HTTPException(status_code=404, detail="School registration not found")
+
+    if str(school.get("approval_status") or "pending").lower() == "approved":
+        raise HTTPException(status_code=400, detail="This school has already been approved")
+
+    now = now_utc()
+    await db.schools.update_one(
+        {"_id": school["_id"]},
+        {"$set": {
+            "registration_payment_phone": payment_phone,
+            "payment_phone_number": payment_phone,
+            "payment_status": "verification_pending",
+            "payment_verification_status": "pending_verification",
+            "updated_at": now,
+        }}
+    )
+    await db.platform_invoices.update_many(
+        {"school_id": school_id, "invoice_type": "installation"},
+        {"$set": {
+            "payment_phone_number": payment_phone,
+            "payment_verification_status": "pending_verification",
+            "status": "verification_pending",
+            "updated_at": now,
+        }}
+    )
+    await log_security_event(
+        "registration_payment_submitted",
+        metadata={
+            "school_id": school_id,
+            "school_code": school_code,
+            "payment_phone_number": payment_phone,
+            "origin": request.headers.get("origin"),
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "Your payment is being verified. The support team will approve your school soon.",
+        "payment_status": "verification_pending",
+        "payment_verification_status": "pending_verification",
+    }
 
 
 @api_router.post("/auth/join-school")
