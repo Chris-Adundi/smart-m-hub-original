@@ -45,6 +45,38 @@
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Manrope', sans-serif;
   }
+
+  input,
+  textarea,
+  select {
+    color: hsl(var(--foreground));
+    background-color: #0B1220;
+    border-color: rgba(51, 65, 85, 0.9);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(100 116 139);
+    opacity: 1;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: rgba(16, 185, 129, 0.75);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22);
+  }
+
+  input[type="file"]::file-selector-button {
+    border: 0;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.16);
+    color: rgb(167 243 208);
+    padding: 6px 12px;
+    margin-right: 12px;
+    font-weight: 600;
+  }
 }
 
 @layer utilities {

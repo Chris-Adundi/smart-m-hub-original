@@ -1,6 +1,7 @@
 from pymongo import MongoClient
+import os
 
-db = MongoClient("mongodb://localhost:27017")["test_database"]
+db = MongoClient(os.getenv("MONGO_URL", "mongodb://localhost:27017"))[os.getenv("DB_NAME", "smart_m_hub")]
 
 user = db.users.find_one({"email": "admin@demo.com"})
 

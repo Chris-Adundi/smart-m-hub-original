@@ -27,6 +27,16 @@ const storyboard = [
   "Parent logs in to view approved notices, fee status, receipts and reports.",
 ];
 
+const whySmartMHub = [
+  "One platform for the entire school",
+  "Secure role-based access",
+  "Faster administrative processes",
+  "Improved communication",
+  "Better financial accountability",
+  "Reduced paperwork",
+  "Real-time data for better decisions",
+];
+
 export default function LandingPage() {
   const navigate = useNavigate();
 
@@ -89,6 +99,29 @@ export default function LandingPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-6 pb-16">
+          <div className="rounded-lg border border-white/10 bg-[#0B1220] p-6 md:p-8">
+            <div className="grid lg:grid-cols-[0.8fr_1.2fr] gap-8 items-start">
+              <div>
+                <p className="text-emerald-300 text-sm font-semibold uppercase tracking-wider">
+                  Why Smart M Hub?
+                </p>
+                <h2 className="mt-3 text-3xl font-bold text-white">
+                  Built around the real work schools do every day.
+                </h2>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {whySmartMHub.map((item) => (
+                  <div key={item} className="flex items-center gap-3 rounded-md border border-white/10 bg-[#101827] px-4 py-3 text-sm text-slate-200">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 

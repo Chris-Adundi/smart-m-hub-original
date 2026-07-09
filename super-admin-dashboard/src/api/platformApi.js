@@ -1,9 +1,16 @@
 import axios from "axios";
 import { logout } from "../auth/superAdminAuth";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform";
+const resolveApiBaseUrl = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured) return configured;
+  if (import.meta.env.PROD) {
+    throw new Error("VITE_API_BASE_URL must be set for deployed builds");
+  }
+  return "http://127.0.0.1:8000/api/platform";
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const getAuthToken = () =>
   localStorage.getItem("smart_m_hub_token") ||

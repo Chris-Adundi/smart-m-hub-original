@@ -1,14 +1,26 @@
 from datetime import datetime, timezone
+import os
+import secrets
+import string
 from pymongo import MongoClient
 from auth import hash_password
 
 
-client = MongoClient("mongodb://localhost:27017")
-db = client["test_database"]
+client = MongoClient(os.getenv("MONGO_URL", "mongodb://localhost:27017"))
+db = client[os.getenv("DB_NAME", "smart_m_hub")]
+
+
+def demo_password(env_name):
+    configured = os.getenv(env_name)
+    if configured:
+        return configured
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(14))
 
 now = datetime.now(timezone.utc)
 demo_school_id = "demo-school"
 demo_school_code = "SMH-KE-000001"
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 existing_demo_school = db.schools.find_one({"school_code": demo_school_code})
 if existing_demo_school:
     demo_school_id = existing_demo_school.get("id") or demo_school_id
@@ -21,9 +33,9 @@ db.schools.update_one(
             "name": "Demo School",
             "slug": "demo-school",
             "school_code": demo_school_code,
-            "login_link": f"http://localhost:3000/login?school={demo_school_code}",
+            "login_link": f"{frontend_url}/login?school={demo_school_code}",
             "invite_code": "DEMO2026",
-            "invite_link": "http://localhost:3000/join/demo-school-DEMO2026",
+            "invite_link": f"{frontend_url}/join/demo-school-DEMO2026",
             "address": "Demo Campus",
             "phone": "+254700000000",
             "email": "admin@demo.com",
@@ -49,11 +61,11 @@ db.schools.update_one(
 )
 
 users = [
-    {"email": "admin@demo.com", "password": "admin123", "role": "school_admin", "full_name": "Demo School Admin", "school_id": demo_school_id},
-    {"email": "secretary@demo.com", "password": "secretary123", "role": "secretary", "full_name": "Demo Secretary", "school_id": demo_school_id},
-    {"email": "finance@demo.com", "password": "finance123", "role": "finance", "full_name": "Demo Finance Officer", "school_id": demo_school_id},
-    {"email": "teacher@demo.com", "password": "teacher123", "role": "teacher", "full_name": "Demo Teacher", "school_id": demo_school_id},
-    {"email": "student@demo.com", "password": "student123", "role": "student", "full_name": "Demo Student", "school_id": demo_school_id},
+    {"email": "admin@demo.com", "password": demo_password("DEMO_ADMIN_PASSWORD"), "role": "school_admin", "full_name": "Demo School Admin", "school_id": demo_school_id},
+    {"email": "secretary@demo.com", "password": demo_password("DEMO_SECRETARY_PASSWORD"), "role": "secretary", "full_name": "Demo Secretary", "school_id": demo_school_id},
+    {"email": "finance@demo.com", "password": demo_password("DEMO_FINANCE_PASSWORD"), "role": "finance", "full_name": "Demo Finance Officer", "school_id": demo_school_id},
+    {"email": "teacher@demo.com", "password": demo_password("DEMO_TEACHER_PASSWORD"), "role": "teacher", "full_name": "Demo Teacher", "school_id": demo_school_id},
+    {"email": "student@demo.com", "password": demo_password("DEMO_STUDENT_PASSWORD"), "role": "student", "full_name": "Demo Student", "school_id": demo_school_id},
 ]
 
 for u in users:
@@ -76,6 +88,7 @@ for u in users:
         },
         upsert=True,
     )
+    print(f"{u['role']} demo user: {u['email']} / {u['password']}")
 
 db.users.update_one(
     {"email": "developer@system.com"},

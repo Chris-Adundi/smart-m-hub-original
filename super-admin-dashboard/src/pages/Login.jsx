@@ -3,10 +3,16 @@ import axios from "axios";
 import { Navigate, useNavigate } from "react-router-dom";
 import { getAuthToken, isSuperAdmin, saveSession } from "../auth/superAdminAuth";
 
-const API_ROOT = (
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000/api/platform"
-).replace(/\/platform\/?$/, "");
+const resolveApiRoot = () => {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured) return configured.replace(/\/platform\/?$/, "");
+  if (import.meta.env.PROD) {
+    throw new Error("VITE_API_BASE_URL must be set for deployed builds");
+  }
+  return "http://127.0.0.1:8000/api";
+};
+
+const API_ROOT = resolveApiRoot();
 
 export default function Login() {
   const [email, setEmail] = useState("developer@system.com");

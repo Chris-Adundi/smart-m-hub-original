@@ -74,7 +74,12 @@ load_dotenv(ROOT_DIR / ".env")
 # =====================================================
 # DATABASE CONNECTION
 # =====================================================
-mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017")
+APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
+mongo_url = os.getenv("MONGO_URL")
+if not mongo_url:
+    if APP_ENV in {"production", "prod"}:
+        raise RuntimeError("MONGO_URL must be set in production")
+    mongo_url = "mongodb://localhost:27017"
 db_name = os.getenv("DB_NAME", "smart_m_hub")
 
 if not isinstance(db_name, str) or not db_name.strip():
@@ -92,14 +97,23 @@ UPLOAD_ROOT = ROOT_DIR / "uploads"
 UPLOAD_ROOT.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Super Admin (Vite)
-        "http://localhost:3000",  # School Admin (React)
+def parse_allowed_origins():
+    configured = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
+    if configured:
+        return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if APP_ENV in {"production", "prod"}:
+        raise RuntimeError("ALLOWED_ORIGINS or CORS_ORIGINS must be set in production")
+    return [
+        "http://localhost:5173",
+        "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
-    ],
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=parse_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -442,7 +456,12 @@ def receipt_breakdown(payment: dict):
 
 
 def get_frontend_url() -> str:
-    return os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    configured = os.getenv("FRONTEND_URL")
+    if configured:
+        return configured.rstrip("/")
+    if APP_ENV in {"production", "prod"}:
+        raise RuntimeError("FRONTEND_URL must be set in production")
+    return "http://localhost:3000"
 
 
 async def ensure_school_identity(school: dict) -> dict:
@@ -2841,10 +2860,7 @@ async def get_school_invite(
     # FRONTEND URL
     # =========================================
 
-    frontend_url = os.getenv(
-        "FRONTEND_URL",
-        "http://localhost:3000"
-    ).rstrip("/")
+    frontend_url = get_frontend_url()
 
     # =========================================
     # SCHOOL LOGIN LINK

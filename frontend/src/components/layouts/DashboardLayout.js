@@ -5,6 +5,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { authService } from "@/services/authService";
+import { API } from "@/App";
 import { Button } from "@/components/ui/button";
 
 import {
@@ -183,10 +184,7 @@ const DashboardLayout = () => {
     if (!user?.school_id || role === "super_admin") return;
 
     let active = true;
-    const backendUrl =
-      process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
-
-    fetch(`${backendUrl.replace(/\/$/, "")}/api/school/profile`, {
+    fetch(`${API}/school/profile`, {
       headers: {
         Authorization: `Bearer ${authService.getToken()}`,
       },

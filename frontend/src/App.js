@@ -52,8 +52,16 @@ import AnnouncementsPage from "@/pages/AnnouncementsPage";
 // ======================
 // BACKEND (SINGLE SOURCE OF TRUTH)
 // ======================
-const BACKEND_URL =
-  process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
+const resolveBackendUrl = () => {
+  const configured = process.env.REACT_APP_BACKEND_URL;
+  if (configured) return configured;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("REACT_APP_BACKEND_URL must be set for deployed builds");
+  }
+  return "http://127.0.0.1:8000";
+};
+
+const BACKEND_URL = resolveBackendUrl();
 
 export const API = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 
