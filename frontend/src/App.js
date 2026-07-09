@@ -54,7 +54,18 @@ import AnnouncementsPage from "@/pages/AnnouncementsPage";
 // ======================
 const resolveBackendUrl = () => {
   const configured = process.env.REACT_APP_BACKEND_URL;
-  if (configured) return configured;
+  const isLocalBackend = (url) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url || "");
+  const isLocalFrontend = () =>
+    ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+
+  if (configured) {
+    if (isLocalBackend(configured) && !isLocalFrontend()) {
+      console.error(
+        "Smart M Hub is using a local backend URL from a public frontend. Set REACT_APP_BACKEND_URL to the public backend URL."
+      );
+    }
+    return configured;
+  }
   if (process.env.NODE_ENV === "production") {
     throw new Error("REACT_APP_BACKEND_URL must be set for deployed builds");
   }
@@ -200,6 +211,16 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
+    const backendUrl = String(API || "");
+    const publicFrontend =
+      !["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+    const localBackend =
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(backendUrl);
+
+    if (!error?.response && publicFrontend && localBackend) {
+      error.message =
+        "Backend is configured as localhost, which testers cannot access from a public link. Set REACT_APP_BACKEND_URL to the public backend URL and restart the frontend.";
+    }
 
     if (status === 401) {
       authService.clearAuth();
