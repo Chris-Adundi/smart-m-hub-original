@@ -76,6 +76,30 @@ const BACKEND_URL = resolveBackendUrl();
 
 export const API = `${BACKEND_URL.replace(/\/$/, "")}/api`;
 
+export const formatApiError = (error, fallback = "Something went wrong") => {
+  const detail =
+    error?.response?.data?.detail ??
+    error?.response?.data?.message ??
+    error?.message ??
+    fallback;
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        const location = Array.isArray(item?.loc) ? item.loc.join(".") : item?.loc;
+        return [location, item?.msg].filter(Boolean).join(": ") || JSON.stringify(item);
+      })
+      .join("; ");
+  }
+
+  if (detail && typeof detail === "object") {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+
+  return String(detail || fallback);
+};
+
 // ======================
 // ROLE NORMALIZER
 // ======================
@@ -220,6 +244,13 @@ apiClient.interceptors.response.use(
     if (!error?.response && publicFrontend && localBackend) {
       error.message =
         "Backend is configured as localhost, which testers cannot access from a public link. Set REACT_APP_BACKEND_URL to the public backend URL and restart the frontend.";
+    }
+
+    const formattedMessage = formatApiError(error);
+    error.message = formattedMessage;
+    if (error?.response?.data) {
+      error.response.data.detail = formattedMessage;
+      error.response.data.message = formattedMessage;
     }
 
     if (status === 401) {

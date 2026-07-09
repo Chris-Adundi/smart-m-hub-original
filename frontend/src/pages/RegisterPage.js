@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiClient } from "@/App";
+import { apiClient, formatApiError } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -110,12 +110,7 @@ const RegisterPage = () => {
       setFormData(initialForm);
       toast.success("School registration submitted successfully");
     } catch (error) {
-      toast.error(
-        error?.response?.data?.detail ||
-          error?.response?.data?.message ||
-          error?.message ||
-          "Registration failed"
-      );
+      toast.error(formatApiError(error, "Registration failed"));
     } finally {
       setLoading(false);
     }
@@ -145,12 +140,7 @@ const RegisterPage = () => {
       setPaymentSubmitted(true);
       toast.success("Payment phone submitted for verification");
     } catch (error) {
-      toast.error(
-        error?.response?.data?.detail ||
-          error?.response?.data?.message ||
-          error?.message ||
-          "Payment submission failed"
-      );
+      toast.error(formatApiError(error, "Payment submission failed"));
     } finally {
       setPaymentLoading(false);
     }

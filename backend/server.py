@@ -2426,6 +2426,7 @@ async def join_school(request: dict):
         # INPUT NORMALIZATION
         # =========================
         invite_code = (request.get("invite_code") or "").strip().upper()
+        school_code = (request.get("school_code") or "").strip().upper()
         email = (request.get("email") or "").strip().lower()
         password = request.get("password") or ""
         full_name = (request.get("full_name") or "").strip()
@@ -2438,8 +2439,8 @@ async def join_school(request: dict):
         # =========================
         # VALIDATION
         # =========================
-        if not invite_code:
-            raise HTTPException(status_code=400, detail="Invite code required")
+        if not invite_code and not school_code:
+            raise HTTPException(status_code=400, detail="School code or invite code is required")
 
         if not email or not password or not full_name:
             raise HTTPException(
@@ -2463,12 +2464,11 @@ async def join_school(request: dict):
         # =========================
         # FIND SCHOOL
         # =========================
-        school = await db.schools.find_one({
-            "invite_code": invite_code
-        })
+        school_query = {"school_code": school_code} if school_code else {"invite_code": invite_code}
+        school = await db.schools.find_one(school_query)
 
         if not school:
-            raise HTTPException(status_code=404, detail="Invalid invite code")
+            raise HTTPException(status_code=404, detail="Invalid school code or invite code")
 
         # =========================
         # SCHOOL STATUS CHECK

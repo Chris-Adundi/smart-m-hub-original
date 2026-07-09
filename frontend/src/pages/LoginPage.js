@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Link,
   useNavigate,
   useLocation,
   useParams,
 } from "react-router-dom";
-import { authService, apiClient } from "@/App";
+import { authService, apiClient, formatApiError } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -541,13 +542,7 @@ const selectedRoleData = roles.find(
         error
       );
 
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        error?.message ||
-        "Login failed";
-
-      toast.error(String(detail));
+      toast.error(formatApiError(error, "Login failed"));
     } finally {
       setLoading(false);
     }
@@ -563,7 +558,7 @@ const selectedRoleData = roles.find(
       setResetCodeSent(true);
       toast.success("Verification code sent to the registered phone number");
     } catch (error) {
-      toast.error(error?.response?.data?.detail || "Failed to request reset code");
+      toast.error(formatApiError(error, "Failed to request reset code"));
     }
   };
 
@@ -581,7 +576,7 @@ const selectedRoleData = roles.find(
       setResetCodeSent(false);
       setResetForm({ email: "", school_code: "", code: "", new_password: "" });
     } catch (error) {
-      toast.error(error?.response?.data?.detail || "Failed to reset password");
+      toast.error(formatApiError(error, "Failed to reset password"));
     }
   };
 
@@ -873,6 +868,20 @@ const selectedRoleData = roles.find(
                   ? "Signing in..."
                   : "Sign In"}
               </Button>
+
+              {selectedRole !== "super_admin" && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-center">
+                  <p className="text-sm text-slate-300">
+                    First time using this school portal?
+                  </p>
+                  <Link
+                    to={`/join-school${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`}
+                    className="mt-2 inline-flex text-sm font-semibold text-emerald-300 hover:text-emerald-200"
+                  >
+                    Sign up and wait for school admin approval
+                  </Link>
+                </div>
+              )}
 
             </form>
             )}

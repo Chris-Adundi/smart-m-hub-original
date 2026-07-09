@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 
-import { apiClient } from "@/App";
+import { apiClient, formatApiError } from "@/App";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,12 +32,14 @@ const JoinSchoolPage = () => {
   const location = useLocation();
 
   const queryCode = new URLSearchParams(location.search).get("code");
+  const querySchoolCode = new URLSearchParams(location.search).get("school");
   const initialCode = inviteCode || queryCode || "";
 
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     invite_code: initialCode,
+    school_code: querySchoolCode || "",
     full_name: "",
     role: "",
     email: "",
@@ -59,8 +61,8 @@ const JoinSchoolPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.invite_code.trim())
-      return toast.error("Invite code is required");
+    if (!formData.invite_code.trim() && !formData.school_code.trim())
+      return toast.error("School code or invite code is required");
     if (!formData.full_name.trim())
       return toast.error("Full name is required");
     if (!formData.role)
@@ -83,6 +85,7 @@ const JoinSchoolPage = () => {
     try {
       const payload = {
         invite_code: formData.invite_code.trim(),
+        school_code: formData.school_code.trim().toUpperCase(),
         full_name: formData.full_name.trim(),
         role: formData.role.toLowerCase(),
         email: formData.email.trim().toLowerCase(),
@@ -105,12 +108,7 @@ const JoinSchoolPage = () => {
 
       navigate("/login");
     } catch (error) {
-      toast.error(
-        error?.response?.data?.detail ||
-          error?.response?.data?.message ||
-          error?.message ||
-          "Failed to join school"
-      );
+      toast.error(formatApiError(error, "Failed to join school"));
     } finally {
       setLoading(false);
     }
@@ -132,7 +130,7 @@ const JoinSchoolPage = () => {
             </CardTitle>
 
             <CardDescription className="text-slate-400 mt-2">
-              Create your account using the school invite code
+              Create your account using the school code or invite code. Access starts after school admin approval.
             </CardDescription>
           </div>
         </CardHeader>
@@ -141,13 +139,24 @@ const JoinSchoolPage = () => {
           <form onSubmit={handleSubmit} className="space-y-6">
 
             <div className="space-y-2">
+              <Label>School Code</Label>
+              <Input
+                value={formData.school_code}
+                onChange={(e) =>
+                  updateField("school_code", e.target.value.toUpperCase())
+                }
+                placeholder="SMH-AB12CD34EF"
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label>Invite Code</Label>
               <Input
                 value={formData.invite_code}
                 onChange={(e) =>
                   updateField("invite_code", e.target.value)
                 }
-                placeholder="Enter school invite code"
+                placeholder="Optional if you have the school code"
               />
             </div>
 
@@ -250,7 +259,7 @@ const JoinSchoolPage = () => {
           </form>
 
           <div className="mt-6 text-center text-sm text-slate-500">
-            Your account will be linked to the school after approval.
+            Your account will remain pending until the school admin approves it.
           </div>
         </CardContent>
 
