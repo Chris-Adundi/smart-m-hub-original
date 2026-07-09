@@ -2623,6 +2623,23 @@ async def login(request: LoginRequest):
 
         user = await db.users.find_one(user_query)
 
+        if not user and login_school and email == str(login_school.get("email") or "").strip().lower():
+            user = await db.users.find_one({
+                "school_id": str(login_school.get("id")),
+                "role": "school_admin",
+            })
+            if user:
+                await log_security_event(
+                    "login_school_email_alias_used",
+                    user,
+                    {
+                        "school_id": str(login_school.get("id")),
+                        "school_code": school_code,
+                        "login_email": email,
+                        "admin_email": user.get("email"),
+                    },
+                )
+
         if not user:
             await record_login_failure(email, school_code, "user_not_found")
             await log_security_event("login_failed", metadata={"email": email, "school_code": school_code, "reason": "user_not_found"})
