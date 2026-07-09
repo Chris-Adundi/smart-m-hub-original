@@ -693,7 +693,7 @@ const selectedRoleData = roles.find(
                 <div>
                   <Label className="text-slate-300 mb-2 block">School Code</Label>
                   <Input
-                    placeholder="SMH-KE-000021"
+                    placeholder="SMH-AB12CD34EF"
                     value={resetForm.school_code}
                     onChange={(e) => setResetForm({ ...resetForm, school_code: e.target.value.toUpperCase() })}
                   />
@@ -751,7 +751,7 @@ const selectedRoleData = roles.find(
                     School Code
                   </Label>
                   <Input
-                    placeholder="SMH-KE-000021"
+                    placeholder="SMH-AB12CD34EF"
                     value={formData.school_code}
                     onChange={(e) =>
                       updateField("school_code", e.target.value.toUpperCase())
