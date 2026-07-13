@@ -24,6 +24,7 @@ class ApprovalStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    DEACTIVATED = "deactivated"
 
 
 class SubscriptionStatus(str, Enum):
@@ -192,6 +193,23 @@ class User(BaseModel):
     approval_status: str = "pending"
 
     is_active: bool = True
+    is_suspended: bool = False
+
+    selected_classes: List[str] = Field(default_factory=list)
+    child_name: Optional[str] = None
+    child_admission_number: Optional[str] = None
+
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rejected_by: Optional[str] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    deactivated_by: Optional[str] = None
+    deactivated_at: Optional[datetime] = None
+    deactivation_reason: Optional[str] = None
+    reactivated_by: Optional[str] = None
+    reactivated_at: Optional[datetime] = None
+    reactivation_reason: Optional[str] = None
 
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)

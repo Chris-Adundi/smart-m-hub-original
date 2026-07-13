@@ -58,6 +58,12 @@ const roles = [
     desc: "Student records & announcements",
     icon: FileText,
   },
+  {
+    key: "supporting_staff",
+    label: "Supporting Staff",
+    desc: "Restricted school access",
+    icon: Users,
+  },
 
   {
     key: "student",
@@ -96,6 +102,7 @@ const normalizeRole = (role) => {
     accountant: "finance",
 
     secretary: "secretary",
+    supporting_staff: "supporting_staff",
 
     student: "student",
 
@@ -125,6 +132,9 @@ const getRedirectPath = (role) => {
 
     case "secretary":
       return "/app/secretary-portal";
+
+    case "supporting_staff":
+      return "/app/dashboard";
 
     case "super_admin":
       return "/app/dashboard";

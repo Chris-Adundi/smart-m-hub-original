@@ -47,6 +47,8 @@ const StaffPage = () => {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState(null);
 
   const [formData, setFormData] = useState(initialForm);
 
@@ -112,6 +114,11 @@ const StaffPage = () => {
   };
 
   const safeStaff = Array.isArray(staff) ? staff : [];
+
+  const openProfile = (member) => {
+    setSelectedStaff(member);
+    setProfileOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -349,7 +356,11 @@ const StaffPage = () => {
 
                 ) : (
                   safeStaff.map((member) => (
-                    <TableRow key={member.id || member._id}>
+                    <TableRow
+                      key={member.id || member._id}
+                      className="cursor-pointer"
+                      onClick={() => openProfile(member)}
+                    >
                       <TableCell>{member.employee_number}</TableCell>
                       <TableCell>
                         {member.full_name || member.user?.full_name}
@@ -365,7 +376,10 @@ const StaffPage = () => {
                           size="sm"
                           variant="outline"
                           disabled={member.is_active === false}
-                          onClick={() => deactivateUser(member)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deactivateUser(member);
+                          }}
                         >
                           Deactivate
                         </Button>
@@ -381,6 +395,35 @@ const StaffPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedStaff?.full_name || "Staff Profile"}</DialogTitle>
+          </DialogHeader>
+          {selectedStaff && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                ["Full Name", selectedStaff.full_name],
+                ["Email", selectedStaff.email],
+                ["Phone", selectedStaff.phone],
+                ["Role", String(selectedStaff.role || "").replaceAll("_", " ")],
+                ["Employee Number", selectedStaff.employee_number],
+                ["Department", selectedStaff.department],
+                ["Position", selectedStaff.position],
+                ["Joined Date", selectedStaff.joined_date ? new Date(selectedStaff.joined_date).toLocaleDateString() : "-"],
+                ["Status", selectedStaff.status || (selectedStaff.is_active === false ? "deactivated" : "active")],
+                ["Approval", selectedStaff.approval_status],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <p className="font-medium text-slate-900 capitalize">{value || "-"}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

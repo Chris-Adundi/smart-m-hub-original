@@ -4,6 +4,7 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,12 +17,11 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 
-import { apiClient, authService } from "@/App";
+import { apiClient, authService, formatApiError } from "@/App";
 
 import { toast } from "sonner";
 
 import {
-  AlertTriangle,
   Loader2,
   Users,
   UsersRound,
@@ -87,6 +87,9 @@ const defaultStats = {
 
 const defaultPending = {
   pending_users: [],
+  approved_users: [],
+  rejected_users: [],
+  deactivated_users: [],
   results: [],
   attendance: [],
   payments: [],
@@ -102,6 +105,8 @@ const defaultPending = {
 // =========================
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+
   const [stats, setStats] =
     useState(defaultStats);
 
@@ -251,6 +256,21 @@ const isStudent =
                 nestedUsers.pending ||
                 [],
 
+              approved_users:
+                data.approved_users ||
+                nestedUsers.approved ||
+                [],
+
+              rejected_users:
+                data.rejected_users ||
+                nestedUsers.rejected ||
+                [],
+
+              deactivated_users:
+                data.deactivated_users ||
+                nestedUsers.suspended ||
+                [],
+
               results:
                 data.results ||
                 nestedOps.results ||
@@ -332,43 +352,36 @@ const isStudent =
 
   return () => clearInterval(interval);
 }, [fetchDashboardData, user]);
-  // =========================
-  // APPROVAL HANDLER
-  // =========================
-
-  const handleApproval = async (
-    itemType,
-    item,
-    action
-  ) => {
-    const itemId =
-      item?._id || item?.id;
-
-    if (!itemId) {
-      toast.error("Invalid item ID");
+  const handleUserStatusAction = async (item, action) => {
+    const userId = item?.id || item?._id || item?.mongo_id || item?.user_id;
+    if (!userId) {
+      toast.error("Invalid user ID");
       return;
     }
 
     try {
       setApprovalLoading(true);
 
-      await apiClient.patch(
-        `/admin/approve/${itemType}/${itemId}`,
-        { action }
-      );
+      if (action === "approve") {
+        await apiClient.patch(`/admin/users/${userId}/approve`);
+      } else if (action === "reject") {
+        await apiClient.patch(`/admin/users/${userId}/reject`);
+      } else {
+        await apiClient.patch(`/admin/users/${userId}/${action}`, {
+          reason: action === "deactivate" ? "Deactivated by school admin" : "Reactivated by school admin",
+        });
+      }
 
-      toast.success(
-        `${itemType} ${action} successfully`
-      );
-
+      const actionLabels = {
+        approve: "approved",
+        reject: "rejected",
+        deactivate: "deactivated",
+        reactivate: "reactivated",
+      };
+      toast.success(`User ${actionLabels[action] || "updated"} successfully`);
       await fetchDashboardData();
     } catch (error) {
-      console.error(error);
-
-      toast.error(
-        error?.response?.data?.detail ||
-          "Action failed"
-      );
+      toast.error(formatApiError(error, "User action failed"));
     } finally {
       setApprovalLoading(false);
     }
@@ -401,59 +414,6 @@ const isStudent =
   }
 
   // =========================
-  // TABS CONFIG
-  // =========================
-
-  const tabs = [
-    {
-      key: "pending_users",
-      label: "Users",
-      items: pending.pending_users,
-      itemType: "user",
-    },
-
-    {
-      key: "results",
-      label: "Results",
-      items: pending.results,
-      itemType: "result",
-    },
-
-    {
-      key: "attendance",
-      label: "Attendance",
-      items: pending.attendance,
-      itemType: "attendance",
-    },
-
-    {
-      key: "payments",
-      label: "Payments",
-      items: pending.payments,
-      itemType: "payment",
-    },
-
-    {
-      key: "announcements",
-      label: "Announcements",
-      items: pending.announcements,
-      itemType: "announcement",
-    },
-
-    {
-      key: "inventory",
-      label: "Inventory",
-      items: pending.inventory,
-      itemType: "inventory",
-    },
-  ];
-
-  const firstTab =
-    tabs.find(
-      (t) => t.items?.length > 0
-    )?.key || "pending_users";
-
-  // =========================
   // ROLE BASED CARDS
   // =========================
 
@@ -467,6 +427,7 @@ const isStudent =
         isAdmin ||
         isTeacher ||
         isSecretary,
+      path: "/app/students",
     },
 
     {
@@ -475,6 +436,7 @@ const isStudent =
         stats?.total_staff || 0,
       icon: UsersRound,
       show: isAdmin,
+      path: "/app/staff",
     },
 
     {
@@ -486,6 +448,7 @@ const isStudent =
         isAdmin ||
         isTeacher ||
         isSecretary,
+      path: "/app/attendance",
     },
 
     {
@@ -496,6 +459,7 @@ const isStudent =
         0,
       icon: ClipboardCheck,
       show: isAdmin,
+      path: "#school-users",
     },
 
     {
@@ -506,6 +470,7 @@ const isStudent =
       icon: CreditCard,
       show:
         isFinance || isSchoolAdmin,
+      path: "/app/fees",
     },
 
     {
@@ -517,8 +482,100 @@ const isStudent =
         isTeacher ||
         isStudent ||
         isSchoolAdmin,
+      path: "/app/timetable",
     },
   ];
+
+  const openCard = (path) => {
+    if (!path) return;
+    if (path.startsWith("#")) {
+      document.querySelector(path)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      return;
+    }
+    navigate(path);
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "-";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
+  };
+
+  const formatClasses = (item) => {
+    const selected = item?.selected_classes;
+    if (Array.isArray(selected) && selected.length > 0) return selected.join(", ");
+    return item?.class_name || item?.child_admission_number || "-";
+  };
+
+  const renderUserRow = (item, mode) => (
+    <div
+      key={item.id || item._id}
+      className="p-4 bg-[#0F172A] rounded-xl space-y-3"
+    >
+      <div className="grid md:grid-cols-7 gap-3 text-sm">
+        <div>
+          <p className="text-slate-500 text-xs">Name</p>
+          <p className="text-white font-semibold">{item.full_name || "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Email</p>
+          <p className="text-slate-300 break-all">{item.email || "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Phone</p>
+          <p className="text-slate-300">{item.phone || "-"}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Requested Role</p>
+          <p className="text-slate-300">{String(item.role || "-").replaceAll("_", " ")}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Selected Classes</p>
+          <p className="text-slate-300">{formatClasses(item)}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Date Submitted</p>
+          <p className="text-slate-300">{formatDate(item.join_request_submitted_at || item.created_at)}</p>
+        </div>
+        <div>
+          <p className="text-slate-500 text-xs">Current Status</p>
+          <p className="text-slate-300">{item.status || item.approval_status || "-"}</p>
+        </div>
+      </div>
+
+      {item.role === "parent" && (
+        <p className="text-xs text-slate-400">
+          Child: {item.child_name || "-"} | Admission: {item.child_admission_number || "-"}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {mode === "pending" && (
+          <>
+            <Button disabled={approvalLoading} onClick={() => handleUserStatusAction(item, "approve")}>
+              Approve
+            </Button>
+            <Button disabled={approvalLoading} variant="destructive" onClick={() => handleUserStatusAction(item, "reject")}>
+              Reject
+            </Button>
+          </>
+        )}
+        {mode === "active" && (
+          <Button disabled={approvalLoading} variant="outline" onClick={() => handleUserStatusAction(item, "deactivate")}>
+            Deactivate
+          </Button>
+        )}
+        {mode === "deactivated" && (
+          <Button disabled={approvalLoading} variant="outline" onClick={() => handleUserStatusAction(item, "reactivate")}>
+            Reactivate
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-8">
@@ -683,7 +740,16 @@ const isStudent =
             return (
               <Card
                 key={card.title}
-                className="bg-[#1A2332] border-[#1E293B]"
+                className="bg-[#1A2332] border-[#1E293B] cursor-pointer hover:border-emerald-500/40 transition-colors"
+                onClick={() => openCard(card.path)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openCard(card.path);
+                  }
+                }}
               >
 
                 <CardContent className="p-5">
@@ -777,151 +843,68 @@ const isStudent =
         </Card>
       )}
 
-      {/* ADMIN APPROVALS */}
       {isAdmin && (
-        <Card className="bg-[#1A2332] border-[#1E293B]">
-
+        <Card id="school-users" className="bg-[#1A2332] border-[#1E293B]">
           <CardContent className="p-6">
-
             <div className="flex items-center gap-3 mb-6">
-
-              <AlertTriangle className="w-5 h-5 text-amber-400" />
-
+              <UsersRound className="w-5 h-5 text-emerald-400" />
               <div>
-
-                <h2 className="text-lg font-semibold text-white">
-                  Pending Approvals
-                </h2>
-
+                <h2 className="text-lg font-semibold text-white">School Users</h2>
                 <p className="text-sm text-slate-400">
-                  {
-                    pending?.totals
-                      ?.all_pending_operations
-                  }{" "}
-                  total items
+                  Review join requests and manage account access for this school.
                 </p>
-
               </div>
-
             </div>
 
-            {pending?.totals
-              ?.all_pending_operations ===
-            0 ? (
-              <div className="text-center py-10 text-emerald-400">
-                No pending approvals
-              </div>
-            ) : (
-              <Tabs defaultValue={firstTab}>
+            <Tabs defaultValue="pending">
+              <TabsList className="bg-[#0F172A] flex flex-wrap gap-2">
+                <TabsTrigger value="pending">Pending ({pending.pending_users.length})</TabsTrigger>
+                <TabsTrigger value="active">Active ({pending.approved_users.length})</TabsTrigger>
+                <TabsTrigger value="rejected">Rejected ({pending.rejected_users.length})</TabsTrigger>
+                <TabsTrigger value="deactivated">Deactivated ({pending.deactivated_users.length})</TabsTrigger>
+              </TabsList>
 
-                <TabsList className="bg-[#0F172A] flex flex-wrap gap-2">
-
-                  {tabs.map((tab) =>
-                    tab.items?.length ? (
-                      <TabsTrigger
-                        key={tab.key}
-                        value={tab.key}
-                      >
-                        {tab.label} (
-                        {tab.items.length})
-                      </TabsTrigger>
-                    ) : null
+              <TabsContent value="pending" className="mt-4">
+                <div className="space-y-3">
+                  {pending.pending_users.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">No pending users</div>
+                  ) : (
+                    pending.pending_users.map((item) => renderUserRow(item, "pending"))
                   )}
+                </div>
+              </TabsContent>
 
-                </TabsList>
+              <TabsContent value="active" className="mt-4">
+                <div className="space-y-3">
+                  {pending.approved_users.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">No active users</div>
+                  ) : (
+                    pending.approved_users.map((item) => renderUserRow(item, "active"))
+                  )}
+                </div>
+              </TabsContent>
 
-                {tabs.map((tab) =>
-                  tab.items?.length ? (
-                    <TabsContent
-                      key={tab.key}
-                      value={tab.key}
-                    >
+              <TabsContent value="rejected" className="mt-4">
+                <div className="space-y-3">
+                  {pending.rejected_users.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">No rejected users</div>
+                  ) : (
+                    pending.rejected_users.map((item) => renderUserRow(item, "rejected"))
+                  )}
+                </div>
+              </TabsContent>
 
-                      <div className="space-y-3 mt-4">
-
-                        {tab.items.map(
-                          (
-                            item,
-                            index
-                          ) => (
-                            <div
-                              key={
-                                item._id ||
-                                item.id ||
-                                index
-                              }
-                              className="p-4 bg-[#0F172A] rounded-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                            >
-
-                              <div>
-
-                                <p className="text-white font-semibold">
-                                  {item.full_name ||
-                                    item.title ||
-                                    item.subject ||
-                                    "Item"}
-                                </p>
-
-                                <p className="text-xs text-slate-400 mt-1">
-                                  Submitted by{" "}
-                                  {item
-                                    ?.submitter
-                                    ?.full_name ||
-                                    "Unknown"}
-                                </p>
-
-                              </div>
-
-                              <div className="flex gap-2">
-
-                                <Button
-                                  disabled={
-                                    approvalLoading
-                                  }
-                                  onClick={() =>
-                                    handleApproval(
-                                      tab.itemType,
-                                      item,
-                                      "approved"
-                                    )
-                                  }
-                                >
-                                  Approve
-                                </Button>
-
-                                <Button
-                                  disabled={
-                                    approvalLoading
-                                  }
-                                  variant="destructive"
-                                  onClick={() =>
-                                    handleApproval(
-                                      tab.itemType,
-                                      item,
-                                      "rejected"
-                                    )
-                                  }
-                                >
-                                  Reject
-                                </Button>
-
-                              </div>
-
-                            </div>
-                          )
-                        )}
-
-                      </div>
-
-                    </TabsContent>
-                  ) : null
-                )}
-
-              </Tabs>
-            )}
-
+              <TabsContent value="deactivated" className="mt-4">
+                <div className="space-y-3">
+                  {pending.deactivated_users.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">No deactivated users</div>
+                  ) : (
+                    pending.deactivated_users.map((item) => renderUserRow(item, "deactivated"))
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
-
         </Card>
       )}
 

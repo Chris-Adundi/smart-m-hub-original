@@ -41,6 +41,7 @@ function normalizeRole(role) {
     accountant: "finance",
 
     secretary: "secretary",
+    supporting_staff: "supporting_staff",
 
     student: "student",
     parent: "student",

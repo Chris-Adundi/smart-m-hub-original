@@ -71,13 +71,27 @@ const initialForm = {
   documents_attached: [],
 };
 
+export const CLASS_LEVELS = [
+  {
+    label: "Primary",
+    classes: ["PP1", "PP2", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6"],
+  },
+  {
+    label: "Junior Secondary",
+    classes: ["Grade 7", "Grade 8", "Grade 9"],
+  },
+  {
+    label: "Senior Secondary",
+    classes: ["Grade 10", "Grade 11", "Grade 12"],
+  },
+];
+
 const textFields = [
   ["full_name", "Full Name"],
   ["date_of_birth", "Date of Birth", "date"],
   ["birth_certificate_no", "Birth Certificate No."],
   ["nationality", "Nationality"],
   ["religion", "Religion"],
-  ["class_name", "Class"],
   ["stream", "Stream"],
   ["year_of_study", "Boarding/Day"],
   ["guardian_name", "Guardian 1 Name"],
@@ -243,6 +257,22 @@ const StudentsPage = () => {
                     <Input type={type || "text"} value={formData[field] || ""} onChange={(e) => updateField(field, e.target.value)} required={field === "full_name"} />
                   </div>
                 ))}
+                <div>
+                  <Label>Class</Label>
+                  <Select value={formData.class_name} onValueChange={(value) => updateField("class_name", value)}>
+                    <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                    <SelectContent>
+                      {CLASS_LEVELS.map((level) => (
+                        <div key={level.label}>
+                          <div className="px-2 py-1 text-xs font-semibold text-slate-500">{level.label}</div>
+                          {level.classes.map((className) => (
+                            <SelectItem key={className} value={className}>{className}</SelectItem>
+                          ))}
+                        </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="md:col-span-2">
                   <Label>Special Needs</Label>
                   <Textarea value={formData.special_needs} onChange={(e) => updateField("special_needs", e.target.value)} />
@@ -311,6 +341,7 @@ const StudentsPage = () => {
                 <TableHead>Admission No.</TableHead>
                 <TableHead>Full Name</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead>Level</TableHead>
                 <TableHead>Guardian</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Approval</TableHead>
@@ -318,15 +349,16 @@ const StudentsPage = () => {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-6">Loading...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-6">Loading...</TableCell></TableRow>
               ) : filteredStudents.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-6">No students found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-6">No students found</TableCell></TableRow>
               ) : (
                 filteredStudents.map((student) => (
                   <TableRow key={student.id} className="cursor-pointer" onClick={() => openProfile(student)}>
                     <TableCell>{student.admission_number}</TableCell>
                     <TableCell>{student.full_name}</TableCell>
                     <TableCell>{student.class_name}</TableCell>
+                    <TableCell>{student.education_level || "-"}</TableCell>
                     <TableCell>{student.guardian_name}</TableCell>
                     <TableCell><Badge>{student.status}</Badge></TableCell>
                     <TableCell><Badge>{student.approval_status}</Badge></TableCell>
@@ -370,7 +402,7 @@ const StudentsPage = () => {
               <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_access_code", "student_id", "full_name", "status", "approval_status"])} />
               <ProfileTab value="personal" data={pick(selectedStudent, ["gender", "date_of_birth", "birth_certificate_no", "nationality", "religion", "special_needs"])} />
               <ProfileTab value="guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
-              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "stream", "year_of_study", "previous_school", "transfer_reason", "last_class"])} />
+              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school", "transfer_reason", "last_class"])} />
               <ProfileTab value="attendance" data={{ note: "Attendance history is preserved through the attendance module." }} />
               <ProfileTab value="finance" data={{ note: "Fee balances and receipts are managed through Finance and Student Portal." }} />
               <ProfileTab value="discipline" data={{ note: "Discipline history is retained for audit and reporting." }} />

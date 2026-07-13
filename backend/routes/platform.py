@@ -1,6 +1,7 @@
 import calendar
 from datetime import datetime, timezone
 from pathlib import Path
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
 
@@ -39,6 +40,20 @@ def money(value):
         return float(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def normalized_school_approval_status(school: dict) -> str:
+    explicit = str(school.get("approval_status") or "").strip().lower()
+    if explicit:
+        return explicit
+
+    status_value = str(school.get("status") or "").strip().lower()
+    subscription_status = str(school.get("subscription_status") or "").strip().lower()
+    if school.get("is_active") is True or status_value == "active" or subscription_status in {"active", "trial"}:
+        return "approved"
+    if status_value in {"rejected", "declined"}:
+        return "rejected"
+    return "pending"
 
 
 def uptime_label():
@@ -244,7 +259,7 @@ async def serialize_school(school: dict):
         "payment_phone_number": school.get("payment_phone_number") or school.get("registration_payment_phone"),
         "payment_verification_status": school.get("payment_verification_status") or "awaiting_payment_phone",
         "school_status": school.get("status") or ("active" if school.get("is_active") else "inactive"),
-        "approval_status": school.get("approval_status") or "pending",
+        "approval_status": normalized_school_approval_status(school),
         "is_active": bool(school.get("is_active", False)),
         "email": school.get("email"),
         "phone": school.get("phone"),
@@ -267,40 +282,105 @@ async def serialize_school(school: dict):
     }
 
 
+def serialize_school_summary(school: dict, users: list, students_count: int, payments: list, invoices: list):
+    school_id = str(school.get("id") or school.get("_id"))
+    if isinstance(payments, dict):
+        payments_count = int(payments.get("count") or 0)
+        revenue = money(payments.get("revenue"))
+    else:
+        payments_count = len(payments)
+        revenue = sum(money(p.get("amount")) for p in payments if p.get("status") in {"paid", "completed", "approved"})
+
+    if isinstance(invoices, dict):
+        invoices_count = int(invoices.get("count") or 0)
+        outstanding = money(invoices.get("outstanding"))
+    else:
+        invoices_count = len(invoices)
+        outstanding = sum(money(i.get("amount")) for i in invoices if i.get("status") in {"pending", "overdue"})
+
+    admin = next((u for u in users if u.get("role") == "school_admin"), None)
+    theme = school.get("theme") or {}
+
+    return {
+        "id": school_id,
+        "mongo_id": str(school.get("_id")) if school.get("_id") else None,
+        "name": school.get("name"),
+        "logo_url": school.get("logo_url") or school.get("logo"),
+        "school_code": school.get("school_code"),
+        "school_type": school.get("school_type"),
+        "administrator": admin.get("full_name") if admin else school.get("principal_name"),
+        "administrator_email": admin.get("email") if admin else school.get("principal_email"),
+        "administrator_phone": admin.get("phone") if admin else school.get("principal_phone"),
+        "current_subscription": school.get("subscription_plan") or "standard",
+        "subscription_status": school.get("subscription_status") or "inactive",
+        "registration_date": school.get("created_at"),
+        "last_login": max([u.get("last_login") for u in users if u.get("last_login")] or [None]),
+        "payment_status": school.get("payment_status") or "pending",
+        "payment_phone_number": school.get("payment_phone_number") or school.get("registration_payment_phone"),
+        "payment_verification_status": school.get("payment_verification_status") or "awaiting_payment_phone",
+        "school_status": school.get("status") or ("active" if school.get("is_active") else "inactive"),
+        "approval_status": normalized_school_approval_status(school),
+        "is_active": bool(school.get("is_active", False)),
+        "email": school.get("email"),
+        "phone": school.get("phone"),
+        "address": school.get("address"),
+        "login_link": school.get("login_link"),
+        "theme": {
+            "primary": theme.get("primary") or "#10B981",
+            "secondary": theme.get("secondary") or "#0F172A",
+        },
+        "counts": {
+            "users": len(users),
+            "students": students_count,
+            "payments": payments_count,
+            "invoices": invoices_count,
+        },
+        "revenue": revenue,
+        "outstanding": outstanding,
+        "created_at": school.get("created_at"),
+        "updated_at": school.get("updated_at"),
+    }
+
+
 @router.get("/metrics")
 async def get_platform_metrics(user=Depends(require_super_admin)):
-    schools = await db.schools.find({}).to_list(5000)
-    users = await db.users.find({}).to_list(10000)
-    payments = await db.payments.find({}).to_list(10000)
-    invoices = await db.platform_invoices.find({}).to_list(5000)
-    tickets = await db.support_tickets.find({}).to_list(5000)
-    audit_logs = await db.audit_logs.find({}, {"_id": 0, "action": 1, "timestamp": 1}).sort("timestamp", -1).limit(10000).to_list(10000)
+    today = datetime.now(timezone.utc).date().isoformat()
+    schools = await db.schools.find(
+        {},
+        {"_id": 1, "id": 1, "is_active": 1, "status": 1, "subscription_status": 1, "created_at": 1, "approval_status": 1}
+    ).to_list(5000)
+    payments = await db.payments.find(
+        {"status": {"$in": ["paid", "completed", "approved"]}},
+        {"_id": 0, "amount": 1}
+    ).to_list(10000)
+    invoices = await db.platform_invoices.find(
+        {"status": {"$in": ["paid", "pending", "overdue"]}},
+        {"_id": 0, "amount": 1, "status": 1}
+    ).to_list(10000)
 
-    paid_revenue = sum(money(p.get("amount")) for p in payments if p.get("status") in {"paid", "completed", "approved"})
+    paid_revenue = sum(money(p.get("amount")) for p in payments)
     invoice_revenue = sum(money(i.get("amount")) for i in invoices if i.get("status") == "paid")
     outstanding = sum(money(i.get("amount")) for i in invoices if i.get("status") in {"pending", "overdue"})
-
-    today = datetime.now(timezone.utc).date().isoformat()
 
     return {
         "total_registered_schools": len(schools),
         "total_schools": len(schools),
-        "active_schools": sum(1 for s in schools if s.get("is_active") is True),
+        "active_schools": sum(1 for s in schools if s.get("is_active") is True or normalized_school_approval_status(s) == "approved"),
         "suspended_schools": sum(1 for s in schools if str(s.get("status")).lower() == "suspended"),
         "trial_schools": sum(1 for s in schools if s.get("subscription_status") == "trial"),
         "monthly_revenue": paid_revenue + invoice_revenue,
         "outstanding_revenue": outstanding,
         "new_registrations": sum(1 for s in schools if str(s.get("created_at", "")).startswith(today)),
-        "pending_approvals": sum(1 for s in schools if s.get("approval_status") == "pending"),
-        "open_support_tickets": sum(1 for t in tickets if t.get("status", "open") == "open"),
+        "pending_approvals": sum(1 for s in schools if normalized_school_approval_status(s) == "pending"),
+        "open_support_tickets": await db.support_tickets.count_documents({"status": {"$in": ["open", None]}}),
         "system_health": "operational",
-        "active_users": sum(1 for u in users if u.get("is_active") is not False),
-        "daily_login_statistics": sum(1 for u in users if str(u.get("last_login", "")).startswith(today)),
-        "total_users": len(users),
+        "active_users": await db.users.count_documents({"is_active": {"$ne": False}}),
+        "daily_login_statistics": await db.users.count_documents({"last_login": {"$regex": f"^{today}"}}),
+        "total_users": await db.users.count_documents({}),
         "total_revenue": paid_revenue + invoice_revenue,
-        "storage_usage": upload_storage_usage(),
-        "api_activity_today": sum(1 for log in audit_logs if is_today(log.get("timestamp"), today)),
-        "failed_logins_today": sum(1 for log in audit_logs if log.get("action") == "login_failed" and is_today(log.get("timestamp"), today)),
+        "storage_usage": {"used_mb": 0, "files": 0, "deferred": True},
+        "api_activity_today": await db.audit_logs.count_documents({"timestamp": {"$regex": f"^{today}"}}),
+        "failed_logins_today": await db.audit_logs.count_documents({"action": "login_failed", "timestamp": {"$regex": f"^{today}"}}),
         "overdue_invoices": sum(1 for i in invoices if i.get("status") == "overdue"),
     }
 
@@ -346,17 +426,88 @@ async def system_health(user=Depends(require_super_admin)):
 
 @router.get("/schools")
 async def get_all_schools(user=Depends(require_super_admin)):
-    schools = []
-    async for school in db.schools.find().sort("created_at", -1):
-        schools.append(await serialize_school(school))
+    school_docs = await db.schools.find().sort("created_at", -1).to_list(5000)
+    school_ids = [str(school.get("id") or school.get("_id")) for school in school_docs]
+
+    users_by_school = defaultdict(list)
+    async for user_doc in db.users.find(
+        {"school_id": {"$in": school_ids}},
+        {"_id": 0, "school_id": 1, "role": 1, "full_name": 1, "email": 1, "phone": 1, "last_login": 1}
+    ):
+        users_by_school[str(user_doc.get("school_id"))].append(user_doc)
+
+    students_by_school = defaultdict(int)
+    async for row in db.students.aggregate([
+        {"$match": {"school_id": {"$in": school_ids}}},
+        {"$group": {"_id": "$school_id", "count": {"$sum": 1}}},
+    ]):
+        students_by_school[str(row.get("_id"))] = int(row.get("count") or 0)
+
+    payments_by_school = defaultdict(lambda: {"count": 0, "revenue": 0})
+    async for row in db.payments.aggregate([
+        {"$match": {"school_id": {"$in": school_ids}}},
+        {"$group": {
+            "_id": "$school_id",
+            "count": {"$sum": 1},
+            "revenue": {
+                "$sum": {
+                    "$cond": [
+                        {"$in": ["$status", ["paid", "completed", "approved"]]},
+                        {"$ifNull": ["$amount", 0]},
+                        0,
+                    ]
+                }
+            },
+        }},
+    ]):
+        payments_by_school[str(row.get("_id"))] = {
+            "count": int(row.get("count") or 0),
+            "revenue": money(row.get("revenue")),
+        }
+
+    invoices_by_school = defaultdict(lambda: {"count": 0, "outstanding": 0})
+    async for row in db.platform_invoices.aggregate([
+        {"$match": {"school_id": {"$in": school_ids}}},
+        {"$group": {
+            "_id": "$school_id",
+            "count": {"$sum": 1},
+            "outstanding": {
+                "$sum": {
+                    "$cond": [
+                        {"$in": ["$status", ["pending", "overdue"]]},
+                        {"$ifNull": ["$amount", 0]},
+                        0,
+                    ]
+                }
+            },
+        }},
+    ]):
+        invoices_by_school[str(row.get("_id"))] = {
+            "count": int(row.get("count") or 0),
+            "outstanding": money(row.get("outstanding")),
+        }
+
+    schools = [
+        serialize_school_summary(
+            school,
+            users_by_school[str(school.get("id") or school.get("_id"))],
+            students_by_school[str(school.get("id") or school.get("_id"))],
+            payments_by_school[str(school.get("id") or school.get("_id"))],
+            invoices_by_school[str(school.get("id") or school.get("_id"))],
+        )
+        for school in school_docs
+    ]
     return {"count": len(schools), "schools": schools}
 
 
 @router.get("/schools/pending")
 async def get_pending_schools(user=Depends(require_super_admin)):
-    schools = []
-    async for school in db.schools.find({"approval_status": "pending"}).sort("created_at", -1):
-        schools.append(await serialize_school(school))
+    schools_response = await get_all_schools(user)
+    schools = [
+        school
+        for school in schools_response["schools"]
+        if school.get("approval_status") == "pending"
+    ]
     return {"count": len(schools), "schools": schools}
 
 

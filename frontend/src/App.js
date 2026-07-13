@@ -122,6 +122,7 @@ export const normalizeRole = (role) => {
     teacher: "teacher",
     finance: "finance",
     secretary: "secretary",
+    supporting_staff: "supporting_staff",
     student: "student",
     parent: "student",
   };
@@ -144,6 +145,9 @@ export const getDefaultRouteByRole = (role) => {
 
     case "secretary":
       return "/app/secretary-portal";
+
+    case "supporting_staff":
+      return "/app/dashboard";
 
     case "student":
       return "/app/student-portal";
@@ -281,6 +285,7 @@ school_profile: ["super_admin", "school_admin"],
     "teacher",
     "finance",
     "secretary",
+    "supporting_staff",
   ],
 
   students: [
@@ -288,6 +293,7 @@ school_profile: ["super_admin", "school_admin"],
     "school_admin",
     "secretary",
     "teacher",
+    "finance",
   ],
 
   staff: [

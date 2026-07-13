@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
+from bson import ObjectId
 
 import os
 import logging
@@ -160,7 +161,8 @@ VALID_APPROVAL_STATUSES = [
     "pending",
     "approved",
     "rejected",
-    "suspended"
+    "suspended",
+    "deactivated"
 ]
 
 VALID_SYSTEM_ROLES = [
@@ -170,7 +172,8 @@ VALID_SYSTEM_ROLES = [
     "finance",
     "secretary",
     "student",
-    "parent"
+    "parent",
+    "supporting_staff"
 ]
 
 # =====================================================
@@ -352,6 +355,13 @@ def enforce_school_scope(
     return True
 
 
+def resource_lookup(resource_id: str) -> dict:
+    lookup = [{"id": resource_id}]
+    if ObjectId.is_valid(str(resource_id)):
+        lookup.append({"_id": ObjectId(str(resource_id))})
+    return {"$or": lookup}
+
+
 # =====================================================
 # SCHOOL HELPERS
 # =====================================================
@@ -440,6 +450,39 @@ def normalize_fee_status(value: str) -> str:
     return normalized
 
 
+STAFF_JOIN_ROLES = {"teacher", "secretary", "finance", "supporting_staff"}
+
+
+def role_label(role: str) -> str:
+    labels = {
+        "teacher": "Teacher",
+        "secretary": "Secretary",
+        "finance": "Finance Officer",
+        "supporting_staff": "Supporting Staff",
+        "parent": "Parent/Guardian",
+    }
+    return labels.get(normalize_role(role), str(role or "").replace("_", " ").title())
+
+
+def classify_school_level(class_name: Optional[str]) -> Optional[str]:
+    value = str(class_name or "").strip().lower().replace(" ", "")
+    if value in {"pp1", "pp2", "preprimary1", "preprimary2"}:
+        return "Primary"
+
+    match = re.search(r"(\d+)", value)
+    if not match:
+        return None
+
+    grade = int(match.group(1))
+    if 1 <= grade <= 6:
+        return "Primary"
+    if 7 <= grade <= 9:
+        return "Junior Secondary"
+    if 10 <= grade <= 12:
+        return "Senior Secondary"
+    return None
+
+
 def receipt_breakdown(payment: dict):
     default_items = [
         "Tuition",
@@ -508,6 +551,28 @@ async def ensure_school_identity(school: dict) -> dict:
     return school
 
 
+async def find_school_for_join(school_code: Optional[str] = None, invite_code: Optional[str] = None) -> Optional[dict]:
+    normalized_code = str(school_code or "").strip().upper()
+    raw_invite = str(invite_code or "").strip()
+    normalized_invite = raw_invite.upper()
+
+    if normalized_code:
+        return await db.schools.find_one({"school_code": normalized_code})
+
+    if not raw_invite:
+        return None
+
+    return await db.schools.find_one({
+        "$or": [
+            {"invite_code": normalized_invite},
+            {"join_slug": raw_invite},
+            {"join_slug": raw_invite.lower()},
+            {"slug": raw_invite},
+            {"slug": raw_invite.lower()},
+        ]
+    })
+
+
 def school_branding_payload(school: dict) -> dict:
     theme = school.get("theme") or {}
     return {
@@ -527,6 +592,26 @@ def school_branding_payload(school: dict) -> dict:
             "secondary": theme.get("secondary") or "#0F172A"
         }
     }
+
+
+async def get_school_class_names(school_id: str) -> List[str]:
+    class_names = set()
+
+    sources = [
+        (db.timetable, "class_name"),
+        (db.fee_structures, "class_name"),
+        (db.students, "class_name"),
+        (db.exams, "class_name"),
+    ]
+
+    for collection, field_name in sources:
+        values = await collection.distinct(field_name, {"school_id": school_id})
+        for value in values:
+            class_name = str(value or "").strip()
+            if class_name:
+                class_names.add(class_name)
+
+    return sorted(class_names, key=lambda value: value.lower())
 
 
 ALLOWED_UPLOAD_CATEGORIES = {
@@ -630,6 +715,12 @@ class JoinSchoolRequest(BaseModel):
     email: EmailStr
     password: str
 
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    school_code: Optional[str] = None
+    selected_classes: Optional[List[str]] = None
+    child_name: Optional[str] = None
+    child_admission_number: Optional[str] = None
     admission_number: Optional[str] = None
     student_access_code: Optional[str] = None
 
@@ -723,6 +814,7 @@ class InitiatePaymentRequest(BaseModel):
 
     student_id: Optional[str] = None
     term: Optional[str] = None
+    academic_year: Optional[str] = None
     received_from: Optional[str] = None
     transaction_reference: Optional[str] = None
     payment_breakdown: Optional[List[dict]] = None
@@ -1508,7 +1600,7 @@ async def get_staff(
     # BASE QUERY
     # =========================
     query = {
-        "role": {"$in": ["teacher", "finance", "secretary"]}
+        "role": {"$in": ["teacher", "finance", "secretary", "supporting_staff"]}
     }
 
     # =========================
@@ -1537,12 +1629,34 @@ async def get_staff(
         "created_at", -1
     ).to_list(length=200)
 
+    staff_user_ids = [str(member.get("id") or member.get("_id")) for member in staff]
+    staff_profiles = await db.staff.find(
+        {"user_id": {"$in": staff_user_ids}},
+        {"_id": 0}
+    ).to_list(length=500)
+    profile_by_user = {profile.get("user_id"): profile for profile in staff_profiles}
+
+    enriched_staff = []
+    for member in staff:
+        member_id = str(member.get("id") or member.get("_id"))
+        profile = profile_by_user.get(member_id) or {}
+        merged = {
+            **serialize_doc(member),
+            "staff_profile": profile,
+            "employee_number": profile.get("employee_number") or member.get("employee_number") or "-",
+            "department": profile.get("department") or member.get("department") or role_label(member.get("role")),
+            "position": profile.get("position") or member.get("position") or role_label(member.get("role")),
+            "joined_date": profile.get("joined_date") or member.get("joined_date"),
+            "salary": profile.get("salary") or member.get("salary"),
+        }
+        enriched_staff.append(merged)
+
     # =========================
     # RESPONSE
     # =========================
     return {
         "success": True,
-        "data": serialize_docs(staff)
+        "data": enriched_staff
     }
 
 
@@ -1715,7 +1829,11 @@ async def get_pending_items(
 
     suspended_users = await db.users.find({
         **school_filter,
-        "is_suspended": True
+        "$or": [
+            {"is_suspended": True},
+            {"status": "deactivated"},
+            {"approval_status": "deactivated"}
+        ]
     }).sort(
         "created_at", -1
     ).to_list(length=100)
@@ -1793,6 +1911,7 @@ async def get_pending_items(
                 "inventory": len(inventory),
 
                 "all_pending_operations": sum([
+                    len(pending_users),
                     len(results),
                     len(attendance),
                     len(payments),
@@ -1905,7 +2024,7 @@ async def approve_item(
     # FIND ITEM
     # =========================
     query = {
-        "id": item_id,
+        **resource_lookup(item_id),
         **school_filter
     }
 
@@ -1920,14 +2039,29 @@ async def approve_item(
     # =========================
     # UPDATE PAYLOAD
     # =========================
+    action_time = datetime.now(timezone.utc)
     update_data = {
         "approval_status": action,
-        "approved_by": user_id,
         "approval_role": role,
         "approval_reason": payload.reason,
-        "approval_date": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc)
+        "approval_date": action_time,
+        "updated_at": action_time
     }
+
+    if action == "approved":
+        update_data.update({
+            "approved_by": user_id,
+            "approved_at": action_time,
+            "rejected_by": None,
+            "rejected_at": None,
+            "rejection_reason": None,
+        })
+    elif action == "rejected":
+        update_data.update({
+            "rejected_by": user_id,
+            "rejected_at": action_time,
+            "rejection_reason": payload.reason,
+        })
 
     # =========================
     # USER-SPECIFIC LOGIC
@@ -1937,10 +2071,12 @@ async def approve_item(
         if action == "approved":
             update_data["is_active"] = True
             update_data["is_suspended"] = False
+            update_data["status"] = "active"
 
         elif action == "rejected":
             update_data["is_active"] = False
-            update_data["is_suspended"] = True
+            update_data["is_suspended"] = False
+            update_data["status"] = "rejected"
 
     if item_type == "payments" and action == "approved":
         update_data["status"] = "completed"
@@ -2004,7 +2140,7 @@ async def deactivate_school_user(
     if role not in {"school_admin", "super_admin"}:
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    query = {"id": user_id}
+    query = resource_lookup(user_id)
     if role == "school_admin":
         if not school_id:
             raise HTTPException(status_code=403, detail="No school assigned")
@@ -2022,6 +2158,7 @@ async def deactivate_school_user(
         {"$set": {
             "is_active": False,
             "is_suspended": True,
+            "approval_status": "deactivated",
             "status": "deactivated",
             "deactivation_reason": reason,
             "deactivated_by": current_user.get("user_id") or current_user.get("id"),
@@ -2031,6 +2168,173 @@ async def deactivate_school_user(
     )
     await log_security_event("user_deactivated", current_user, {"target_user_id": user_id, "reason": reason})
     return {"success": True, "message": "User deactivated"}
+
+
+@api_router.patch("/admin/users/{user_id}/approve")
+async def approve_school_user(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    return await set_school_user_access_status(
+        user_id,
+        "approved",
+        current_user
+    )
+
+
+@api_router.patch("/admin/users/{user_id}/reject")
+async def reject_school_user(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    return await set_school_user_access_status(
+        user_id,
+        "rejected",
+        current_user
+    )
+
+
+async def set_school_user_access_status(
+    user_id: str,
+    next_status: str,
+    current_user: dict
+):
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id")
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if next_status not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Invalid user action")
+
+    query = resource_lookup(user_id)
+    if role == "school_admin":
+        if not school_id:
+            raise HTTPException(status_code=403, detail="No school assigned")
+        query["school_id"] = school_id
+
+    target = await db.users.find_one(query)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if normalize_role(target.get("role")) in {"school_admin", "super_admin"} and role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only super admin can manage administrators")
+
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    now = now_utc()
+
+    if next_status == "approved":
+        update_data = {
+            "approval_status": "approved",
+            "status": "active",
+            "is_active": True,
+            "is_suspended": False,
+            "approved_by": actor_id,
+            "approved_at": now,
+            "approval_date": now,
+            "rejected_by": None,
+            "rejected_at": None,
+            "rejection_reason": None,
+            "updated_at": now,
+        }
+        message = "User approved"
+    else:
+        update_data = {
+            "approval_status": "rejected",
+            "status": "rejected",
+            "is_active": False,
+            "is_suspended": False,
+            "rejected_by": actor_id,
+            "rejected_at": now,
+            "rejection_reason": None,
+            "updated_at": now,
+        }
+        message = "User rejected"
+
+    await db.users.update_one(query, {"$set": update_data})
+    updated_user = await db.users.find_one(query)
+
+    if next_status == "approved" and normalize_role(target.get("role")) in STAFF_JOIN_ROLES:
+        staff_role = normalize_role(target.get("role"))
+        existing_staff = await db.staff.find_one({
+            "school_id": target.get("school_id"),
+            "user_id": str(target.get("id") or target.get("_id")),
+        })
+        if not existing_staff:
+            employee_number = f"EMP-{str(target.get('id') or user_id).replace('-', '')[:8].upper()}"
+            await db.staff.insert_one({
+                "id": str(uuid.uuid4()),
+                "school_id": target.get("school_id"),
+                "user_id": str(target.get("id") or target.get("_id")),
+                "employee_number": employee_number,
+                "department": target.get("department") or ("Academics" if staff_role == "teacher" else role_label(staff_role)),
+                "position": target.get("position") or role_label(staff_role),
+                "role": staff_role,
+                "salary": None,
+                "joined_date": now,
+                "created_by": actor_id,
+                "created_at": now,
+                "updated_at": now,
+            })
+
+    await log_security_event(
+        f"user_{next_status}",
+        current_user,
+        {
+            "target_user_id": user_id,
+            "target_school_id": target.get("school_id"),
+            "target_role": target.get("role"),
+        }
+    )
+
+    return {
+        "success": True,
+        "message": message,
+        "user": serialize_doc(updated_user)
+    }
+
+
+@api_router.patch("/admin/users/{user_id}/reactivate")
+async def reactivate_school_user(
+    user_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id")
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    query = resource_lookup(user_id)
+    if role == "school_admin":
+        if not school_id:
+            raise HTTPException(status_code=403, detail="No school assigned")
+        query["school_id"] = school_id
+
+    target = await db.users.find_one(query)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if normalize_role(target.get("role")) in {"school_admin", "super_admin"} and role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only super admin can reactivate administrators")
+    if str(target.get("approval_status") or "").lower() == "rejected":
+        raise HTTPException(status_code=400, detail="Rejected users must be approved before reactivation")
+
+    reason = str(payload.get("reason") or "Reactivated by school admin").strip()
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    await db.users.update_one(
+        query,
+        {"$set": {
+            "approval_status": "approved",
+            "is_active": True,
+            "is_suspended": False,
+            "status": "active",
+            "reactivation_reason": reason,
+            "reactivated_by": actor_id,
+            "reactivated_at": now_iso(),
+            "updated_at": now_iso(),
+        }}
+    )
+    await log_security_event("user_reactivated", current_user, {"target_user_id": user_id, "reason": reason})
+    return {"success": True, "message": "User reactivated"}
 
 
 # =========================
@@ -2057,6 +2361,50 @@ async def resolve_school_code(school_code: str):
     return {
         "success": True,
         "data": school_branding_payload(school)
+    }
+
+
+@api_router.get("/public/schools/resolve/{school_code}/classes")
+async def resolve_school_classes(school_code: str):
+    normalized_code = str(school_code or "").strip().upper()
+
+    if not re.fullmatch(r"(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})", normalized_code):
+        raise HTTPException(status_code=400, detail="Invalid school code format")
+
+    school = await db.schools.find_one({
+        "school_code": normalized_code,
+        "is_active": {"$ne": False}
+    })
+
+    if not school:
+        raise HTTPException(status_code=404, detail="School code not found")
+
+    class_names = await get_school_class_names(str(school.get("id")))
+
+    return {
+        "success": True,
+        "data": {
+            "school": school_branding_payload(await ensure_school_identity(school)),
+            "classes": class_names
+        }
+    }
+
+
+@api_router.get("/public/schools/invite/{invite_code}/classes")
+async def resolve_invite_school_classes(invite_code: str):
+    school = await find_school_for_join(invite_code=invite_code)
+
+    if not school or school.get("is_active") is False:
+        raise HTTPException(status_code=404, detail="Invite link not found")
+
+    class_names = await get_school_class_names(str(school.get("id")))
+
+    return {
+        "success": True,
+        "data": {
+            "school": school_branding_payload(await ensure_school_identity(school)),
+            "classes": class_names
+        }
     }
 
 
@@ -2430,9 +2778,13 @@ async def join_school(request: dict):
         email = (request.get("email") or "").strip().lower()
         password = request.get("password") or ""
         full_name = (request.get("full_name") or "").strip()
+        phone = (request.get("phone") or "").strip() or None
         raw_role = (request.get("role") or "teacher")
         admission_number = (request.get("admission_number") or "").strip() or None
         student_access_code = (request.get("student_access_code") or "").strip().upper() or None
+        selected_classes = request.get("selected_classes") or []
+        child_name = (request.get("child_name") or "").strip() or None
+        child_admission_number = (request.get("child_admission_number") or "").strip() or None
 
         role = normalize_role(raw_role).lower()
 
@@ -2453,7 +2805,7 @@ async def join_school(request: dict):
         # =========================
         # ROLE VALIDATION
         # =========================
-        allowed_roles = ["teacher", "student", "parent", "finance", "secretary"]
+        allowed_roles = ["teacher", "parent", "finance", "secretary", "supporting_staff"]
 
         if role not in allowed_roles:
             raise HTTPException(
@@ -2464,8 +2816,7 @@ async def join_school(request: dict):
         # =========================
         # FIND SCHOOL
         # =========================
-        school_query = {"school_code": school_code} if school_code else {"invite_code": invite_code}
-        school = await db.schools.find_one(school_query)
+        school = await find_school_for_join(school_code, invite_code)
 
         if not school:
             raise HTTPException(status_code=404, detail="Invalid school code or invite code")
@@ -2491,21 +2842,37 @@ async def join_school(request: dict):
         school_fingerprint = school.get("fingerprint")
 
         linked_student = None
-        if role in {"student", "parent"}:
-            student_conditions = []
-            if admission_number:
-                student_conditions.append({"admission_number": admission_number})
-            if student_access_code:
-                student_conditions.append({"student_access_code": student_access_code})
-            if not student_conditions:
-                raise HTTPException(status_code=400, detail="Admission number or student access code is required")
+        if role == "parent":
+            if not child_name or not child_admission_number:
+                raise HTTPException(status_code=400, detail="Child name and admission number are required for Parent/Guardian")
             linked_student = await db.students.find_one({
                 "school_id": school_id,
-                "approval_status": "approved",
-                "$or": student_conditions,
+                "admission_number": child_admission_number,
             })
-            if not linked_student:
-                raise HTTPException(status_code=404, detail="Student record not found or not approved")
+
+        if role == "teacher":
+            if not isinstance(selected_classes, list):
+                raise HTTPException(status_code=400, detail="Selected classes must be a list")
+
+            selected_classes = [
+                str(class_name or "").strip()
+                for class_name in selected_classes
+                if str(class_name or "").strip()
+            ]
+
+            if not selected_classes:
+                raise HTTPException(status_code=400, detail="Select at least one class")
+
+            allowed_classes = set(await get_school_class_names(school_id))
+            invalid_classes = [
+                class_name
+                for class_name in selected_classes
+                if class_name not in allowed_classes
+            ]
+            if invalid_classes:
+                raise HTTPException(status_code=400, detail="One or more selected classes do not belong to this school")
+        else:
+            selected_classes = []
 
         # =========================
         # DUPLICATE CHECK
@@ -2533,6 +2900,7 @@ async def join_school(request: dict):
 
             "email": email,
             "full_name": full_name,
+            "phone": phone,
 
             "password_hash": hash_password(password),
 
@@ -2552,6 +2920,10 @@ async def join_school(request: dict):
             "admission_number": admission_number,
             "student_access_code": student_access_code,
             "student_id": linked_student.get("id") if linked_student else None,
+            "selected_classes": selected_classes,
+            "child_name": child_name,
+            "child_admission_number": child_admission_number,
+            "join_request_submitted_at": now_utc(),
 
             # =========================
             # TIMESTAMPS
@@ -2576,17 +2948,21 @@ async def join_school(request: dict):
         # =========================
         return {
             "success": True,
-            "message": "Account created successfully. Awaiting approval.",
+            "message": "Your request has been submitted and is waiting for school administrator approval.",
 
             "user": {
                 "id": user["id"],
                 "email": email,
                 "full_name": full_name,
+                "phone": phone,
                 "role": role,
                 "school_id": school_id,
                 "school_name": school_name,
                 "approval_status": "pending",
-                "is_active": False
+                "is_active": False,
+                "selected_classes": selected_classes,
+                "child_name": child_name,
+                "child_admission_number": child_admission_number
             }
         }
 
@@ -2643,7 +3019,7 @@ async def login(request: LoginRequest):
         if not user:
             await record_login_failure(email, school_code, "user_not_found")
             await log_security_event("login_failed", metadata={"email": email, "school_code": school_code, "reason": "user_not_found"})
-            raise HTTPException(status_code=401, detail="Invalid email or password")
+            raise HTTPException(status_code=401, detail="Invalid login details")
 
         user_id = user.get("id") or str(user.get("_id"))
 
@@ -2652,26 +3028,35 @@ async def login(request: LoginRequest):
         if not stored_hash or not verify_password(password, stored_hash):
             await record_login_failure(email, school_code, "invalid_password")
             await log_security_event("login_failed", user, {"email": email, "school_code": school_code, "reason": "invalid_password"})
-            raise HTTPException(status_code=401, detail="Invalid email or password")
+            raise HTTPException(status_code=401, detail="Invalid login details")
 
         db_role = normalize_role(user.get("role") or "")
+        if not db_role:
+            await record_login_failure(email, school_code, "invalid_role")
+            await log_security_event("login_blocked", user, {"reason": "invalid_role"})
+            raise HTTPException(status_code=403, detail="Invalid login details")
 
         approval_status = (user.get("approval_status") or "pending").lower()
+
+        if approval_status == "deactivated" or str(user.get("status") or "").lower() == "deactivated" or user.get("is_suspended") is True:
+            await record_login_failure(email, school_code, "account_deactivated")
+            await log_security_event("login_blocked", user, {"reason": "account_deactivated"})
+            raise HTTPException(status_code=403, detail="Your account has been deactivated.")
+
+        if approval_status == "rejected":
+            await record_login_failure(email, school_code, "account_rejected")
+            await log_security_event("login_blocked", user, {"reason": "account_rejected"})
+            raise HTTPException(status_code=403, detail="Your request was rejected.")
 
         if approval_status != "approved":
             await record_login_failure(email, school_code, "account_not_approved")
             await log_security_event("login_blocked", user, {"reason": "account_not_approved"})
-            raise HTTPException(status_code=403, detail="Account pending approval")
+            raise HTTPException(status_code=403, detail="Your account is waiting for approval.")
 
         if user.get("is_active") is False:
-            await record_login_failure(email, school_code, "account_disabled")
-            await log_security_event("login_blocked", user, {"reason": "account_disabled"})
-            raise HTTPException(status_code=403, detail="Account disabled")
-
-        if user.get("is_suspended") is True:
-            await record_login_failure(email, school_code, "account_suspended")
-            await log_security_event("login_blocked", user, {"reason": "account_suspended"})
-            raise HTTPException(status_code=403, detail="Account suspended")
+            await record_login_failure(email, school_code, "account_deactivated")
+            await log_security_event("login_blocked", user, {"reason": "account_deactivated"})
+            raise HTTPException(status_code=403, detail="Your account has been deactivated.")
 
         school_id = user.get("school_id")
 
@@ -3289,6 +3674,7 @@ async def create_student(
             "special_needs": request.special_needs,
 
             "class_name": request.class_name,
+            "education_level": classify_school_level(request.class_name),
             "year_of_study": request.year_of_study,
             "stream": request.stream,
 
@@ -3429,6 +3815,9 @@ async def get_students(
         query,
         {"_id": 0}
     ).to_list(length=1000)
+
+    for student in students:
+        student["education_level"] = student.get("education_level") or classify_school_level(student.get("class_name"))
 
     return {
         "success": True,
@@ -3891,6 +4280,7 @@ async def initiate_payment(
             "payment_type": request.payment_type,
             "payment_method": method,
             "term": request.term,
+            "academic_year": request.academic_year,
             "received_from": request.received_from or (student.get("guardian_name") if student else None),
             "transaction_reference": request.transaction_reference,
             "payment_breakdown": request.payment_breakdown or [],
@@ -4028,6 +4418,66 @@ async def get_payments(
             status_code=500,
             detail="Internal server error"
         )    
+
+
+@api_router.get("/students/{student_id}/fee-profile")
+async def get_student_fee_profile(
+    student_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "finance", "secretary"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    student = await db.students.find_one(
+        {"id": student_id, "school_id": school_id},
+        {"_id": 0}
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    payments = await db.payments.find(
+        {"student_id": student_id, "school_id": school_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+
+    fee_structures = await db.fee_structures.find(
+        {"school_id": school_id, "class_name": student.get("class_name")},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+
+    total_due = sum(float(item.get("amount") or 0) for item in fee_structures)
+    approved_paid = sum(
+        float(payment.get("amount") or 0)
+        for payment in payments
+        if payment.get("approval_status") == "approved" and payment.get("status") in {"completed", "approved", "paid"}
+    )
+    balance = total_due - approved_paid
+
+    for payment in payments:
+        payment["year"] = payment.get("academic_year") or str(payment.get("created_at") or "")[:4]
+        payment["payment_breakdown"] = receipt_breakdown(payment)
+        payment["balance_after_payment"] = payment.get("outstanding_balance")
+
+    return {
+        "success": True,
+        "student": {
+            **student,
+            "education_level": student.get("education_level") or classify_school_level(student.get("class_name")),
+        },
+        "payments": payments,
+        "fee_structures": fee_structures,
+        "summary": {
+            "total_due": total_due,
+            "total_paid": approved_paid,
+            "balance": balance,
+            "pending_receipts": len([p for p in payments if p.get("approval_status") == "pending"]),
+        }
+    }
 
 
 @api_router.patch("/finance/fee-status")

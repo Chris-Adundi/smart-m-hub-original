@@ -1,10 +1,5 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +11,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,245 +26,183 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-import { apiClient } from "@/App";
+import { apiClient, authService, formatApiError } from "@/App";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
-import jsPDF from "jspdf";
-import { uploadManagedFile } from "@/utils/uploads";
+import { Plus, Search } from "lucide-react";
+
+const money = (value) => Number(value || 0).toLocaleString();
+const thisYear = new Date().getFullYear().toString();
+
+const initialPayment = {
+  student_id: "",
+  amount: "",
+  payment_type: "fees",
+  payment_method: "mpesa",
+  term: "",
+  academic_year: thisYear,
+  received_from: "",
+  transaction_reference: "",
+  phone_number: "",
+  bank_reference: "",
+  cheque_number: "",
+  total_amount_due: "",
+  outstanding_balance: "",
+};
 
 const FeesPage = () => {
-  const [payments, setPayments] = useState([]);
+  const user = authService.getUser() || {};
+  const isAdmin = user.role === "school_admin" || user.role === "super_admin";
   const [students, setStudents] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [feeProfile, setFeeProfile] = useState(null);
+  const [paymentForm, setPaymentForm] = useState(initialPayment);
 
-  const [formData, setFormData] = useState({
-    phone_number: "",
-    amount: "",
-    payment_type: "fees",
-    payment_method: "mpesa",
-    bank_reference: "",
-    cheque_number: "",
-    student_id: "",
-    receipt_url: "",
-    term: "",
-    received_from: "",
-    transaction_reference: "",
-    total_amount_due: "",
-    outstanding_balance: "",
-  });
-
-  // ----------------------------
-  // FIX: STABLE CALLBACK
-  // ----------------------------
-
-  const normalizePayments = (data) => {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.payments)) return data.payments;
+  const normalize = (payload, key) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.[key])) return payload[key];
     return [];
   };
 
-  const fetchPayments = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await apiClient.get("/payments");
-      const safe = normalizePayments(response?.data);
-
-      setPayments(safe);
+      setLoading(true);
+      const [studentsRes, paymentsRes] = await Promise.all([
+        apiClient.get("/students?approval_status=approved"),
+        apiClient.get("/payments?approval_status=all"),
+      ]);
+      setStudents(normalize(studentsRes?.data, "students"));
+      setPayments(normalize(paymentsRes?.data, "payments"));
     } catch (error) {
-      setPayments([]);
-      toast.error("Failed to fetch payments");
+      toast.error(formatApiError(error, "Failed to load student fees"));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // ----------------------------
-  // EFFECT FIX
-  // ----------------------------
-
   useEffect(() => {
-    fetchPayments();
-    apiClient
-      .get("/students?approval_status=approved")
-      .then((response) => {
-        const data = response?.data;
-        setStudents(Array.isArray(data) ? data : data?.data || data?.students || []);
-      })
-      .catch(() => setStudents([]));
-  }, [fetchPayments]);
+    fetchData();
+  }, [fetchData]);
 
-  // ----------------------------
-  // FORM HANDLER
-  // ----------------------------
+  const filteredStudents = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return students;
+    return students.filter((student) =>
+      [student.full_name, student.admission_number, student.class_name, student.education_level]
+        .some((value) => String(value || "").toLowerCase().includes(needle))
+    );
+  }, [students, query]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    try {
-      await apiClient.post("/payments/initiate", {
-        ...formData,
-        amount: Number(formData.amount || 0),
-        total_amount_due: formData.total_amount_due ? Number(formData.total_amount_due) : null,
-        outstanding_balance: formData.outstanding_balance ? Number(formData.outstanding_balance) : null,
-      });
-
-      toast.success("Payment recorded successfully");
-
-      setDialogOpen(false);
-
-      setFormData({
-        phone_number: "",
-        amount: "",
-        payment_type: "fees",
-        payment_method: "mpesa",
-        bank_reference: "",
-        cheque_number: "",
-        student_id: "",
-        receipt_url: "",
-        term: "",
-        received_from: "",
-        transaction_reference: "",
-        total_amount_due: "",
-        outstanding_balance: "",
-      });
-
-      fetchPayments();
-    } catch (error) {
-      toast.error(
-        error?.response?.data?.detail || "Failed to record payment"
-      );
-    }
-  };
-
-  const handleReceiptUpload = async (file) => {
-    if (!file) return;
-    try {
-      const url = await uploadManagedFile(file, "receipt");
-      setFormData((prev) => ({ ...prev, receipt_url: url }));
-      toast.success("Receipt uploaded");
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || error?.message || "Receipt upload failed");
-    }
-  };
-
-  // ----------------------------
-  // SAFE DATA (MEMO FIX)
-  // ----------------------------
-
-  const safePayments = useMemo(() => {
-    return Array.isArray(payments) ? payments : [];
+  const paymentSummaryByStudent = useMemo(() => {
+    const map = {};
+    payments.forEach((payment) => {
+      const id = payment.student_id;
+      if (!id) return;
+      if (!map[id]) map[id] = { paid: 0, pending: 0, count: 0 };
+      map[id].count += 1;
+      if (payment.approval_status === "approved") {
+        map[id].paid += Number(payment.amount || 0);
+      }
+      if (payment.approval_status === "pending") {
+        map[id].pending += 1;
+      }
+    });
+    return map;
   }, [payments]);
 
-  const totalCollected = useMemo(() => {
-    return safePayments
-      .filter((p) => p?.status === "completed")
-      .reduce((sum, p) => sum + Number(p?.amount || 0), 0);
-  }, [safePayments]);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case "completed":
-        return "bg-green-100 text-green-800";
-      case "pending":
-        return "bg-yellow-100 text-yellow-800";
-      case "failed":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-slate-100 text-slate-800";
+  const openStudent = async (student) => {
+    setSelectedStudent(student);
+    setProfileOpen(true);
+    setFeeProfile(null);
+    try {
+      const response = await apiClient.get(`/students/${student.id}/fee-profile`);
+      setFeeProfile(response?.data || null);
+    } catch (error) {
+      toast.error(formatApiError(error, "Failed to load fee profile"));
     }
   };
 
-  const downloadReceipt = (payment) => {
-    const student = students.find((s) => s.id === payment?.student_id) || {};
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text("SMART M HUB - SCHOOL PAYMENT RECEIPT", 15, 18);
-    doc.setFontSize(11);
-    [
-      `Receipt Number: ${payment?.receipt_number || "-"}`,
-      `Receipt Date: ${payment?.created_at ? new Date(payment.created_at).toLocaleDateString() : "-"}`,
-      `Student Name: ${student.full_name || payment?.student_name || "-"}`,
-      `Admission Number: ${student.admission_number || payment?.admission_number || "-"}`,
-      `Received From: ${student.guardian_name || payment?.received_from || "-"}`,
-      `Payment Method: ${payment?.payment_method || "-"}`,
-      `Reference: ${payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
-      `Item: ${payment?.payment_type || "Fees"}`,
-      `Total Paid: KES ${Number(payment?.amount || 0).toLocaleString()}`,
-      `Received By: ${payment?.submitted_by || "-"}`,
-      `Approved By: ${payment?.approved_by || "-"}`,
-    ].forEach((line, index) => doc.text(line, 15, 36 + index * 9));
-    doc.save(`${payment?.receipt_number || "receipt"}.pdf`);
+  const startPayment = (student = null) => {
+    setPaymentForm({
+      ...initialPayment,
+      student_id: student?.id || "",
+      received_from: student?.guardian_name || "",
+    });
+    setPaymentOpen(true);
   };
 
-  // ----------------------------
-  // LOADING STATE
-  // ----------------------------
+  const submitPayment = async (event) => {
+    event.preventDefault();
+    try {
+      await apiClient.post("/payments/initiate", {
+        ...paymentForm,
+        amount: Number(paymentForm.amount || 0),
+        total_amount_due: paymentForm.total_amount_due ? Number(paymentForm.total_amount_due) : null,
+        outstanding_balance: paymentForm.outstanding_balance ? Number(paymentForm.outstanding_balance) : null,
+      });
+      toast.success(isAdmin ? "Payment recorded and receipt published" : "Payment recorded and sent to school admin for approval");
+      setPaymentOpen(false);
+      await fetchData();
+      if (selectedStudent) await openStudent(selectedStudent);
+    } catch (error) {
+      toast.error(formatApiError(error, "Failed to record payment"));
+    }
+  };
 
-  if (loading) {
-    return (
-      <div className="p-6 text-slate-400">
-        Loading payments...
-      </div>
-    );
-  }
+  const approveReceipt = async (payment) => {
+    try {
+      await apiClient.patch(`/admin/approve/payment/${payment.id}`, { action: "approved" });
+      toast.success("Receipt approved and published to student portal");
+      await fetchData();
+      if (selectedStudent) await openStudent(selectedStudent);
+    } catch (error) {
+      toast.error(formatApiError(error, "Failed to approve receipt"));
+    }
+  };
 
-  // ----------------------------
-  // UI
-  // ----------------------------
+  const rejectReceipt = async (payment) => {
+    try {
+      await apiClient.patch(`/admin/approve/payment/${payment.id}`, { action: "rejected" });
+      toast.success("Receipt rejected");
+      await fetchData();
+      if (selectedStudent) await openStudent(selectedStudent);
+    } catch (error) {
+      toast.error(formatApiError(error, "Failed to reject receipt"));
+    }
+  };
+
+  const profilePayments = Array.isArray(feeProfile?.payments) ? feeProfile.payments : [];
+  const summary = feeProfile?.summary || {};
 
   return (
     <div className="space-y-6">
-
-      {/* HEADER */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-white">
-            Fees & Payments
-          </h2>
-          <p className="text-slate-400 mt-1">
-            Manage fee collection and track payments
-          </p>
+          <h2 className="text-3xl font-bold text-white">Student Fees</h2>
+          <p className="text-slate-400 mt-1">All students, balances, receipts and approval-ready payment records</p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={() => startPayment()}>
               <Plus className="w-4 h-4 mr-2" />
               Record Payment
             </Button>
           </DialogTrigger>
-
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Record Payment</DialogTitle>
+              <DialogTitle>Record Student Payment</DialogTitle>
             </DialogHeader>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-
+            <form onSubmit={submitPayment} className="space-y-4">
               <div className="space-y-2">
                 <Label>Student</Label>
-                <Select
-                  value={formData.student_id}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      student_id: value,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select student" />
-                  </SelectTrigger>
-
+                <Select value={paymentForm.student_id} onValueChange={(value) => setPaymentForm({ ...paymentForm, student_id: value })}>
+                  <SelectTrigger><SelectValue placeholder="Select student" /></SelectTrigger>
                   <SelectContent>
                     {students.map((student) => (
                       <SelectItem key={student.id} value={student.id}>
@@ -273,175 +213,188 @@ const FeesPage = () => {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Amount (KES)</Label>
-                <Input
-                  type="number"
-                  value={formData.amount}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      amount: e.target.value,
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid md:grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Term</Label>
-                  <Input value={formData.term} onChange={(e) => setFormData({ ...formData, term: e.target.value })} />
+                  <Label>Amount Paid</Label>
+                  <Input type="number" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })} required />
                 </div>
                 <div className="space-y-2">
                   <Label>Received From</Label>
-                  <Input value={formData.received_from} onChange={(e) => setFormData({ ...formData, received_from: e.target.value })} />
+                  <Input value={paymentForm.received_from} onChange={(e) => setPaymentForm({ ...paymentForm, received_from: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Academic Year</Label>
+                  <Input value={paymentForm.academic_year} onChange={(e) => setPaymentForm({ ...paymentForm, academic_year: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Term</Label>
+                  <Input value={paymentForm.term} onChange={(e) => setPaymentForm({ ...paymentForm, term: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Total Amount Due</Label>
+                  <Input type="number" value={paymentForm.total_amount_due} onChange={(e) => setPaymentForm({ ...paymentForm, total_amount_due: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Outstanding Balance</Label>
+                  <Input type="number" value={paymentForm.outstanding_balance} onChange={(e) => setPaymentForm({ ...paymentForm, outstanding_balance: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Payment Method</Label>
+                  <Select value={paymentForm.payment_method} onValueChange={(value) => setPaymentForm({ ...paymentForm, payment_method: value })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mpesa">M-Pesa</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="cheque">Cheque</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Payment Item</Label>
+                  <Select value={paymentForm.payment_type} onValueChange={(value) => setPaymentForm({ ...paymentForm, payment_type: value })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fees">School Fees</SelectItem>
+                      <SelectItem value="exam_fee">Exam Fee</SelectItem>
+                      <SelectItem value="transport">Transport</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label>Transaction / Reference Number</Label>
-                <Input value={formData.transaction_reference} onChange={(e) => setFormData({ ...formData, transaction_reference: e.target.value })} />
+                <Input value={paymentForm.transaction_reference} onChange={(e) => setPaymentForm({ ...paymentForm, transaction_reference: e.target.value })} />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Total Amount Due</Label>
-                  <Input type="number" value={formData.total_amount_due} onChange={(e) => setFormData({ ...formData, total_amount_due: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Outstanding Balance</Label>
-                  <Input type="number" value={formData.outstanding_balance} onChange={(e) => setFormData({ ...formData, outstanding_balance: e.target.value })} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Payment Method</Label>
-
-                <Select
-                  value={formData.payment_method}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      payment_method: value,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-
-                  <SelectContent>
-                    <SelectItem value="mpesa">M-Pesa</SelectItem>
-                    <SelectItem value="bank_transfer">
-                      Bank Transfer
-                    </SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="cheque">Cheque</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Payment Type</Label>
-
-                <Select
-                  value={formData.payment_type}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      payment_type: value,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-
-                  <SelectContent>
-                    <SelectItem value="fees">School Fees</SelectItem>
-                    <SelectItem value="exam_fee">Exam Fee</SelectItem>
-                    <SelectItem value="transport">
-                      Transport
-                    </SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Receipt Attachment</Label>
-                <Input type="file" accept="image/*,.pdf" onChange={(e) => handleReceiptUpload(e.target.files?.[0])} />
-                {formData.receipt_url && <p className="text-xs text-emerald-400">Receipt uploaded</p>}
-              </div>
-
-              <Button type="submit" className="w-full">
-                Record Payment
-              </Button>
-
+              <Button type="submit" className="w-full">Save Payment</Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* TABLE */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            Payments (Total: {totalCollected})
-          </CardTitle>
+          <div className="flex items-center gap-3">
+            <Search className="w-4 h-4 text-slate-400" />
+            <Input placeholder="Search student, admission number, class or level" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
         </CardHeader>
-
         <CardContent>
-          {safePayments.length === 0 ? (
-            <div className="text-slate-400 text-center py-10">
-              No payments found
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Receipt</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Attachment</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {safePayments.map((p, i) => (
-                  <TableRow key={p.id || i}>
-                    <TableCell>{p.amount}</TableCell>
-                    <TableCell>{p.receipt_number || "-"}</TableCell>
-                    <TableCell>{p.payment_method}</TableCell>
-
-                    <TableCell>
-                      <Badge className={getStatusColor(p.status)}>
-                        {p.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {p.receipt_url ? (
-                        <a className="text-emerald-400 underline" href={p.receipt_url} target="_blank" rel="noreferrer">
-                          Open
-                        </a>
-                      ) : "-"}
-                    </TableCell>
-                    <TableCell>
-                      <Button size="sm" variant="outline" onClick={() => downloadReceipt(p)}>
-                        Download Receipt
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Student</TableHead>
+                <TableHead>Admission</TableHead>
+                <TableHead>Class</TableHead>
+                <TableHead>Level</TableHead>
+                <TableHead>Approved Paid</TableHead>
+                <TableHead>Pending Receipts</TableHead>
+                <TableHead>Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow><TableCell colSpan={7} className="text-center py-8">Loading...</TableCell></TableRow>
+              ) : filteredStudents.length === 0 ? (
+                <TableRow><TableCell colSpan={7} className="text-center py-8">No students found</TableCell></TableRow>
+              ) : (
+                filteredStudents.map((student) => {
+                  const summaryRow = paymentSummaryByStudent[student.id] || {};
+                  return (
+                    <TableRow key={student.id} className="cursor-pointer" onClick={() => openStudent(student)}>
+                      <TableCell>{student.full_name}</TableCell>
+                      <TableCell>{student.admission_number}</TableCell>
+                      <TableCell>{student.class_name || "-"}</TableCell>
+                      <TableCell>{student.education_level || "-"}</TableCell>
+                      <TableCell>KES {money(summaryRow.paid)}</TableCell>
+                      <TableCell>{summaryRow.pending || 0}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); startPayment(student); }}>
+                          Record
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedStudent?.full_name || "Student Fee Profile"}</DialogTitle>
+          </DialogHeader>
+
+          {selectedStudent && (
+            <div className="space-y-5">
+              <div className="grid md:grid-cols-4 gap-3">
+                <Card><CardContent>Class: {selectedStudent.class_name || "-"}</CardContent></Card>
+                <Card><CardContent>Level: {selectedStudent.education_level || "-"}</CardContent></Card>
+                <Card><CardContent>Paid: KES {money(summary.total_paid)}</CardContent></Card>
+                <Card><CardContent>Balance: KES {money(summary.balance)}</CardContent></Card>
+              </div>
+
+              <div className="flex justify-end">
+                <Button onClick={() => startPayment(selectedStudent)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Record Payment
+                </Button>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Year</TableHead>
+                    <TableHead>Term</TableHead>
+                    <TableHead>Receipt</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Balance</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Student Portal</TableHead>
+                    {isAdmin && <TableHead>Review</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {profilePayments.length === 0 ? (
+                    <TableRow><TableCell colSpan={isAdmin ? 8 : 7} className="text-center py-8">No payments found</TableCell></TableRow>
+                  ) : (
+                    profilePayments.map((payment) => (
+                      <TableRow key={payment.id}>
+                        <TableCell>{payment.year || "-"}</TableCell>
+                        <TableCell>{payment.term || "-"}</TableCell>
+                        <TableCell>{payment.receipt_number || "-"}</TableCell>
+                        <TableCell>KES {money(payment.amount)}</TableCell>
+                        <TableCell>KES {money(payment.outstanding_balance)}</TableCell>
+                        <TableCell><Badge>{payment.approval_status || payment.status}</Badge></TableCell>
+                        <TableCell>{payment.visible_to_student ? "Available" : "Waiting approval"}</TableCell>
+                        {isAdmin && (
+                          <TableCell>
+                            {payment.approval_status === "pending" ? (
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => approveReceipt(payment)}>Approve</Button>
+                                <Button size="sm" variant="destructive" onClick={() => rejectReceipt(payment)}>Reject</Button>
+                              </div>
+                            ) : "-"}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -42,6 +42,7 @@ import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
+import { CLASS_LEVELS } from "@/pages/StudentsPage";
 
 // =========================
 // SAFE NUMBER FORMATTER
@@ -62,6 +63,9 @@ const FinancePortal = () => {
   const [loading, setLoading] = useState(true);
   const [txnDialogOpen, setTxnDialogOpen] = useState(false);
   const [feeDialogOpen, setFeeDialogOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [feeProfile, setFeeProfile] = useState(null);
 
   const [txnForm, setTxnForm] = useState({
     transaction_type: "income",
@@ -250,6 +254,19 @@ const FinancePortal = () => {
     }
   };
 
+  const openStudentProfile = async (student) => {
+    setSelectedStudent(student);
+    setProfileOpen(true);
+    setFeeProfile(null);
+
+    try {
+      const res = await apiClient.get(`/students/${student.id}/fee-profile`);
+      setFeeProfile(res?.data || null);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to load student fee profile");
+    }
+  };
+
   const feeStatusClass = (status) => {
     if (status === "cleared") return "text-emerald-300 bg-emerald-500/10";
     if (status === "warning") return "text-yellow-300 bg-yellow-500/10";
@@ -294,7 +311,19 @@ const FinancePortal = () => {
             <form onSubmit={handleAddFeeStructure} className="space-y-4">
               <div className="space-y-2">
                 <Label>Class</Label>
-                <Input value={feeForm.class_name} onChange={(e) => setFeeForm({ ...feeForm, class_name: e.target.value })} required />
+                <Select value={feeForm.class_name} onValueChange={(value) => setFeeForm({ ...feeForm, class_name: value })}>
+                  <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                  <SelectContent>
+                    {CLASS_LEVELS.map((level) => (
+                      <div key={level.label}>
+                        <div className="px-2 py-1 text-xs font-semibold text-slate-500">{level.label}</div>
+                        {level.classes.map((className) => (
+                          <SelectItem key={className} value={className}>{className}</SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -452,7 +481,7 @@ const FinancePortal = () => {
         <Card><CardContent>Total Income: KES {money(summary?.total_income).toLocaleString()}</CardContent></Card>
         <Card><CardContent>Total Expenditure: KES {money(summary?.total_expenditure).toLocaleString()}</CardContent></Card>
         <Card><CardContent>Balance: KES {money(summary?.running_balance).toLocaleString()}</CardContent></Card>
-        <Card><CardContent>Fees: KES {money(summary?.total_fee_income).toLocaleString()}</CardContent></Card>
+        <Card><CardContent>Student Fees: KES {money(summary?.total_fee_income).toLocaleString()}</CardContent></Card>
       </div>
 
       {/* TABLES */}
@@ -496,16 +525,18 @@ const FinancePortal = () => {
                 <TableHead>Student</TableHead>
                 <TableHead>Admission</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead>Level</TableHead>
                 <TableHead>Fee Status</TableHead>
                 <TableHead>Set Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {students.map((student) => (
-                <TableRow key={student.id}>
+                <TableRow key={student.id} className="cursor-pointer" onClick={() => openStudentProfile(student)}>
                   <TableCell>{student.full_name}</TableCell>
                   <TableCell>{student.admission_number}</TableCell>
                   <TableCell>{student.class_name || "N/A"}</TableCell>
+                  <TableCell>{student.education_level || "N/A"}</TableCell>
                   <TableCell>
                     <span className={`px-2 py-1 rounded text-xs ${feeStatusClass(student.fee_status)}`}>
                       {student.fee_status || "not set"}
@@ -514,13 +545,13 @@ const FinancePortal = () => {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "cleared")}>
+                      <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); updateFeeStatus(student.id, "cleared"); }}>
                         Cleared
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "warning")}>
+                      <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); updateFeeStatus(student.id, "warning"); }}>
                         Warning
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => updateFeeStatus(student.id, "send_home")}>
+                      <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); updateFeeStatus(student.id, "send_home"); }}>
                         Send Home
                       </Button>
                     </div>
@@ -592,6 +623,56 @@ const FinancePortal = () => {
         </TabsContent>
 
       </Tabs>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedStudent?.full_name || "Student Fee Profile"}</DialogTitle>
+          </DialogHeader>
+
+          {selectedStudent && (
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-4 gap-3">
+                <Card><CardContent>Admission: {selectedStudent.admission_number || "N/A"}</CardContent></Card>
+                <Card><CardContent>Class: {selectedStudent.class_name || "N/A"}</CardContent></Card>
+                <Card><CardContent>Paid: KES {money(feeProfile?.summary?.total_paid).toLocaleString()}</CardContent></Card>
+                <Card><CardContent>Balance: KES {money(feeProfile?.summary?.balance).toLocaleString()}</CardContent></Card>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Year</TableHead>
+                    <TableHead>Term</TableHead>
+                    <TableHead>Receipt</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Balance</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Student Portal</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(feeProfile?.payments || []).length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="text-center py-8">No payment history found</TableCell></TableRow>
+                  ) : (
+                    feeProfile.payments.map((payment) => (
+                      <TableRow key={payment.id}>
+                        <TableCell>{payment.year || "N/A"}</TableCell>
+                        <TableCell>{payment.term || "N/A"}</TableCell>
+                        <TableCell>{payment.receipt_number || "N/A"}</TableCell>
+                        <TableCell>KES {money(payment.amount).toLocaleString()}</TableCell>
+                        <TableCell>KES {money(payment.outstanding_balance).toLocaleString()}</TableCell>
+                        <TableCell>{payment.approval_status || payment.status || "pending"}</TableCell>
+                        <TableCell>{payment.visible_to_student ? "Available" : "Waiting approval"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

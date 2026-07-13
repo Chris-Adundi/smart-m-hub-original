@@ -22,6 +22,7 @@ const ROLE_ROUTES = {
   teacher: "/app/teacher-portal",
   finance: "/app/finance-portal",
   secretary: "/app/secretary-portal",
+  supporting_staff: "/app/dashboard",
   student: "/app/student-portal",
   parent: "/app/student-portal",
 };

@@ -52,6 +52,7 @@ const normalizeRole = (role) => {
     accountant: "finance",
 
     secretary: "secretary",
+    supporting_staff: "supporting_staff",
 
     student: "student",
     parent: "student",
@@ -69,7 +70,7 @@ const MENU_ITEMS = [
     icon: LayoutDashboard,
     label: "Dashboard",
     path: "/app/dashboard",
-    roles: ["super_admin", "school_admin", "teacher", "finance", "secretary"],
+    roles: ["super_admin", "school_admin", "teacher", "finance", "secretary", "supporting_staff"],
   },
   {
     icon: Building2,
@@ -81,7 +82,7 @@ const MENU_ITEMS = [
     icon: Users,
     label: "Students",
     path: "/app/students",
-    roles: ["school_admin", "secretary", "teacher"],
+    roles: ["school_admin", "secretary", "teacher", "finance"],
   },
   {
     icon: UsersRound,
@@ -91,7 +92,7 @@ const MENU_ITEMS = [
   },
   {
     icon: CreditCard,
-    label: "Fees",
+    label: "Student Fees",
     path: "/app/fees",
     roles: ["school_admin", "finance"],
   },
