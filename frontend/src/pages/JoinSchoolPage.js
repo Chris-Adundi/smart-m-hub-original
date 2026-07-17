@@ -22,15 +22,11 @@ import {
 } from "@/components/ui/select";
 
 import { toast } from "sonner";
-import { Building2, Check, GraduationCap } from "lucide-react";
+import { Building2, GraduationCap } from "lucide-react";
 
 const SCHOOL_CODE_PATTERN = /^(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})$/;
 
 const roleOptions = [
-  { value: "teacher", label: "Teacher" },
-  { value: "secretary", label: "Secretary" },
-  { value: "finance", label: "Finance Officer" },
-  { value: "supporting_staff", label: "Supporting Staff" },
   { value: "parent", label: "Parent/Guardian" },
 ];
 
@@ -46,7 +42,6 @@ const JoinSchoolPage = () => {
   const [loading, setLoading] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [school, setSchool] = useState(null);
-  const [classes, setClasses] = useState([]);
 
   const [formData, setFormData] = useState({
     school_code: initialSchoolCode.toUpperCase(),
@@ -69,7 +64,6 @@ const JoinSchoolPage = () => {
   };
 
   const normalizedSchoolCode = formData.school_code.trim().toUpperCase();
-  const isTeacher = formData.role === "teacher";
   const isParent = formData.role === "parent";
 
   useEffect(() => {
@@ -77,7 +71,6 @@ const JoinSchoolPage = () => {
 
     if (!SCHOOL_CODE_PATTERN.test(normalizedSchoolCode) && !inviteValue) {
       setSchool(null);
-      setClasses([]);
       return;
     }
 
@@ -95,11 +88,9 @@ const JoinSchoolPage = () => {
         if (!active) return;
         const data = response?.data?.data || {};
         setSchool(data.school || null);
-        setClasses(Array.isArray(data.classes) ? data.classes : []);
       } catch {
         if (!active) return;
         setSchool(null);
-        setClasses([]);
       } finally {
         if (active) setResolving(false);
       }
@@ -110,21 +101,6 @@ const JoinSchoolPage = () => {
       active = false;
     };
   }, [normalizedSchoolCode, formData.invite_code]);
-
-  const toggleClass = (className) => {
-    setFormData((prev) => {
-      const current = new Set(prev.selected_classes || []);
-      if (current.has(className)) {
-        current.delete(className);
-      } else {
-        current.add(className);
-      }
-      return {
-        ...prev,
-        selected_classes: Array.from(current),
-      };
-    });
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -142,9 +118,6 @@ const JoinSchoolPage = () => {
     if (!formData.phone.trim()) return toast.error("Phone number is required");
     if (!formData.password) return toast.error("Password is required");
     if (!formData.role) return toast.error("Please select a role");
-    if (isTeacher && formData.selected_classes.length === 0) {
-      return toast.error("Select at least one class");
-    }
     if (isParent && (!formData.child_name.trim() || !formData.child_admission_number.trim())) {
       return toast.error("Child name and admission number are required");
     }
@@ -159,7 +132,7 @@ const JoinSchoolPage = () => {
         phone: formData.phone.trim(),
         password: formData.password,
         role: formData.role,
-        selected_classes: isTeacher ? formData.selected_classes : [],
+        selected_classes: [],
         child_name: isParent ? formData.child_name.trim() : null,
         child_admission_number: isParent ? formData.child_admission_number.trim() : null,
       });
@@ -188,9 +161,9 @@ const JoinSchoolPage = () => {
             )}
           </div>
           <div>
-            <CardTitle className="text-3xl font-bold text-white">Join School</CardTitle>
+            <CardTitle className="text-3xl font-bold text-white">Parent/Guardian Registration</CardTitle>
             <CardDescription className="text-slate-400 mt-2">
-              Submit your account request for an already registered school.
+              Submit a parent or guardian account request for an already registered school.
             </CardDescription>
           </div>
         </CardHeader>
@@ -263,39 +236,6 @@ const JoinSchoolPage = () => {
               </Select>
             </div>
 
-            {isTeacher && (
-              <div className="space-y-3 rounded-lg border border-white/10 p-4">
-                <div>
-                  <Label>Responsible Classes</Label>
-                  <p className="text-xs text-slate-400 mt-1">Only classes from the selected school are shown.</p>
-                </div>
-                {classes.length === 0 ? (
-                  <p className="text-sm text-amber-300">No classes found for this school code yet.</p>
-                ) : (
-                  <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
-                    {classes.map((className) => {
-                      const selected = formData.selected_classes.includes(className);
-                      return (
-                        <button
-                          key={className}
-                          type="button"
-                          onClick={() => toggleClass(className)}
-                          className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${
-                            selected
-                              ? "border-emerald-400 bg-emerald-500/15 text-white"
-                              : "border-white/10 bg-[#0F172A] text-slate-300"
-                          }`}
-                        >
-                          <span>{className}</span>
-                          {selected && <Check className="w-4 h-4 text-emerald-300" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
             {isParent && (
               <div className="grid md:grid-cols-2 gap-4 rounded-lg border border-white/10 p-4">
                 <div className="space-y-2">
@@ -318,9 +258,9 @@ const JoinSchoolPage = () => {
           </form>
 
           <div className="mt-6 text-center text-sm text-slate-500">
-            Your request has to be approved by the school administrator before login.{" "}
+            Staff accounts are created by the school administrator from Staff Management.{" "}
             <Link to="/login" className="text-emerald-300 hover:text-emerald-200">
-              Already approved?
+              Already have an account?
             </Link>
           </div>
         </CardContent>

@@ -33,6 +33,7 @@ import {
   Download,
   TrendingUp,
   Printer,
+  FileText,
 } from "lucide-react";
 
 /* ---------------- SAFE HELPERS ---------------- */
@@ -97,6 +98,12 @@ const StudentPortal = () => {
   const payments = Array.isArray(data?.payments) ? data.payments : [];
   const announcements = Array.isArray(data?.announcements)
     ? data.announcements
+    : [];
+  const assessmentReports = Array.isArray(data?.assessment_reports)
+    ? data.assessment_reports
+    : [];
+  const reportNotifications = Array.isArray(data?.report_notifications)
+    ? data.report_notifications
     : [];
   const feeBalance = safeNum(data?.fee_balance);
   const feeStatus = data?.fee_status || "Not published";
@@ -272,6 +279,74 @@ const StudentPortal = () => {
     toast.success("Downloaded report card");
   };
 
+  const generateCBCReport = (report) => {
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const learner = report?.learner_details || {};
+    const school = report?.school_details || {};
+    doc.setFontSize(18);
+    doc.text(school.name || "CBC Assessment Report", 14, 16);
+    doc.setFontSize(11);
+    doc.text(`${report?.exam_name || "-"} | ${report?.term || "-"} | ${report?.academic_year || "-"}`, 14, 25);
+    doc.text(`${learner.full_name || student?.full_name || "-"} | ${learner.admission_number || student?.admission_number || "-"} | ${report?.class_name || "-"}`, 14, 33);
+    let y = 46;
+    (report?.learning_areas || []).forEach((area, index) => {
+      if (y > 185) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.text(`${index + 1}. ${area.name}: ${area.score ?? "-"} ${area.achievement_level || ""} ${area.teacher_remarks || ""}`, 14, y);
+      y += 8;
+    });
+    doc.text(`Teacher Remarks: ${report?.teacher_remarks || "-"}`, 14, y + 8);
+    doc.text(`Principal Remarks: ${report?.principal_remarks || "-"}`, 14, y + 16);
+    doc.save(`${learner.admission_number || "cbc-report"}.pdf`);
+  };
+
+  const printCBCReport = (report) => {
+    const popup = window.open("", "_blank", "width=1000,height=700");
+    if (!popup) return toast.error("Popup blocked");
+    const learner = report?.learner_details || {};
+    popup.document.write(`
+      <html>
+        <head>
+          <title>${report?.exam_name || "CBC Report"}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #111827; padding-bottom: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>${report?.school_details?.name || "CBC Assessment Report"}</h1>
+              <p>${report?.school_details?.motto || ""}</p>
+            </div>
+            <div>
+              <p>${report?.exam_name || "-"}</p>
+              <p>${report?.term || "-"} ${report?.academic_year || ""}</p>
+            </div>
+          </div>
+          <p><strong>Learner:</strong> ${learner.full_name || student?.full_name || "-"} | <strong>Adm:</strong> ${learner.admission_number || "-"}</p>
+          <table>
+            <thead><tr><th>Learning Area</th><th>Score</th><th>Level</th><th>Remarks</th></tr></thead>
+            <tbody>
+              ${(report?.learning_areas || []).map((area) => `
+                <tr><td>${area.name || "-"}</td><td>${area.score ?? "-"}</td><td>${area.achievement_level || "-"}</td><td>${area.teacher_remarks || ""}</td></tr>
+              `).join("")}
+            </tbody>
+          </table>
+          <p><strong>Teacher Remarks:</strong> ${report?.teacher_remarks || "-"}</p>
+          <p><strong>Principal Remarks:</strong> ${report?.principal_remarks || "-"}</p>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
   /* ---------------- LOADING ---------------- */
   if (loading) {
     return (
@@ -342,10 +417,13 @@ const StudentPortal = () => {
 
         <Card className="bg-[#1A2332] border-[#1E293B]">
           <CardContent className="p-4">
-            <p className="text-slate-400 text-sm">Exam / Assessment Files</p>
+            <p className="text-slate-400 text-sm">CBC Reports</p>
             <p className="text-white text-xl font-bold">
-              {exams.length + assessments.length}
+              {assessmentReports.length}
             </p>
+            {reportNotifications.length > 0 && (
+              <p className="text-xs text-emerald-400 mt-1">{reportNotifications.length} new</p>
+            )}
           </CardContent>
         </Card>
 
@@ -365,6 +443,7 @@ const StudentPortal = () => {
 
         <TabsList className="bg-[#0F1A2A] border border-[#1E293B]">
           <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="cbc">CBC Reports</TabsTrigger>
           <TabsTrigger value="fees">Fees</TabsTrigger>
           <TabsTrigger value="announcements">Announcements</TabsTrigger>
         </TabsList>
@@ -421,6 +500,56 @@ const StudentPortal = () => {
                 </TableBody>
 
               </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="cbc">
+          <Card className="bg-[#1A2332] border-[#1E293B]">
+            <CardHeader>
+              <CardTitle className="text-white flex gap-2 items-center">
+                <FileText className="w-4 h-4 text-emerald-400" />
+                CBC Assessment Reports
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {assessmentReports.length === 0 ? (
+                <p className="text-slate-400">No published CBC reports yet</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Exam</TableHead>
+                      <TableHead>Term</TableHead>
+                      <TableHead>Class</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {assessmentReports.map((report) => (
+                      <TableRow key={report.id}>
+                        <TableCell>{report.exam_name || "-"}</TableCell>
+                        <TableCell>{report.term || "-"} {report.academic_year || ""}</TableCell>
+                        <TableCell>{report.class_name || "-"}</TableCell>
+                        <TableCell><Badge>{report.status}</Badge></TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => generateCBCReport(report)}>
+                              <Download className="w-3 h-3 mr-1" />
+                              PDF
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => printCBCReport(report)}>
+                              <Printer className="w-3 h-3 mr-1" />
+                              Print
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

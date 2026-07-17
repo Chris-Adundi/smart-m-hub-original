@@ -148,10 +148,6 @@ const JoinSchoolPage = () => {
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="teacher">Teacher</SelectItem>
-                  <SelectItem value="finance">Finance</SelectItem>
-                  <SelectItem value="secretary">Secretary</SelectItem>
-                  <SelectItem value="student">Student</SelectItem>
                   <SelectItem value="parent">Parent</SelectItem>
                 </SelectContent>
               </Select>

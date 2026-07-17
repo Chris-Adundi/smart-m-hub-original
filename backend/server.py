@@ -17,7 +17,7 @@ import string
 
 from pathlib import Path
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
 # =====================================================
@@ -971,18 +971,79 @@ class ProgressStudentsRequest(BaseModel):
     from_class: Optional[str] = None
 
 
+class CBCPathwayRequest(BaseModel):
+    pathway: Optional[str] = None
+
+
+class AssessmentTemplateRequest(BaseModel):
+    class_name: str
+    pathway: Optional[str] = None
+    title: Optional[str] = None
+    learning_areas: List[dict]
+    competencies: Optional[List[dict]] = None
+    values: Optional[List[dict]] = None
+    achievement_levels: Optional[List[dict]] = None
+
+
+class AssessmentReportUpdateRequest(BaseModel):
+    learning_areas: Optional[List[dict]] = None
+    competencies: Optional[List[dict]] = None
+    values: Optional[List[dict]] = None
+    attendance: Optional[dict] = None
+    co_curricular: Optional[dict] = None
+    teacher_remarks: Optional[str] = None
+    principal_remarks: Optional[str] = None
+    parent_acknowledgement: Optional[dict] = None
+    teacher_name: Optional[str] = None
+    principal_name: Optional[str] = None
+
+
+class AssessmentStatusRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 class CreateStaffPayload(BaseModel):
 
     full_name: str
     email: EmailStr
     phone: Optional[str] = None
+    national_id: Optional[str] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    passport_photo_url: Optional[str] = None
     employee_number: str
+    tsc_number: Optional[str] = None
+    staff_category: Optional[str] = None
     department: str
     position: str
+    designation: Optional[str] = None
     role: str = "teacher"
     password: str
+    confirm_password: Optional[str] = None
+    account_status: Optional[str] = "active"
     salary: Optional[float] = None
     joined_date: Optional[str] = None
+
+
+class UpdateStaffPayload(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    national_id: Optional[str] = None
+    gender: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    passport_photo_url: Optional[str] = None
+    employee_number: Optional[str] = None
+    tsc_number: Optional[str] = None
+    staff_category: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
+    designation: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
+    salary: Optional[float] = None
+    joined_date: Optional[str] = None
+    account_status: Optional[str] = None
 
 
 # =========================
@@ -1600,7 +1661,8 @@ async def get_staff(
     # BASE QUERY
     # =========================
     query = {
-        "role": {"$in": ["teacher", "finance", "secretary", "supporting_staff"]}
+        "role": {"$in": ["teacher", "finance", "secretary", "supporting_staff"]},
+        "deleted": {"$ne": True},
     }
 
     # =========================
@@ -1646,6 +1708,13 @@ async def get_staff(
             "employee_number": profile.get("employee_number") or member.get("employee_number") or "-",
             "department": profile.get("department") or member.get("department") or role_label(member.get("role")),
             "position": profile.get("position") or member.get("position") or role_label(member.get("role")),
+            "designation": profile.get("designation") or member.get("designation"),
+            "staff_category": profile.get("staff_category") or member.get("staff_category"),
+            "national_id": profile.get("national_id") or member.get("national_id"),
+            "gender": profile.get("gender") or member.get("gender"),
+            "date_of_birth": profile.get("date_of_birth") or member.get("date_of_birth"),
+            "passport_photo_url": profile.get("passport_photo_url") or member.get("passport_photo_url"),
+            "tsc_number": profile.get("tsc_number") or member.get("tsc_number"),
             "joined_date": profile.get("joined_date") or member.get("joined_date"),
             "salary": profile.get("salary") or member.get("salary"),
         }
@@ -1667,7 +1736,7 @@ async def create_staff(
 ):
     role = normalize_role(current_user.get("role"))
 
-    if role not in ["school_admin", "super_admin"]:
+    if role != "school_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -1675,7 +1744,7 @@ async def create_staff(
 
     school_id = str(current_user.get("school_id") or "").strip()
 
-    if role != "super_admin" and not school_id:
+    if not school_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No school assigned"
@@ -1688,6 +1757,13 @@ async def create_staff(
             status_code=400,
             detail="Staff role must be teacher, finance, secretary, or supporting_staff"
         )
+
+    if payload.confirm_password is not None and payload.password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    account_status = str(payload.account_status or "active").strip().lower()
+    if account_status not in {"active", "suspended", "inactive"}:
+        raise HTTPException(status_code=400, detail="Status must be active, suspended, or inactive")
 
     validate_password_strength(payload.password)
 
@@ -1712,18 +1788,31 @@ async def create_staff(
     now = now_utc()
     user_id = str(uuid.uuid4())
     actor_id = current_user.get("user_id")
+    school = await db.schools.find_one({"id": school_id})
+    if school:
+        school = await ensure_school_identity(school)
+    school_code = school.get("school_code") if school else None
+    is_active = account_status == "active"
 
     user_doc = {
         "id": user_id,
         "school_id": school_id,
+        "school_code": school_code,
         "email": email,
         "password_hash": hash_password(payload.password),
         "full_name": payload.full_name,
         "phone": payload.phone,
+        "national_id": payload.national_id,
+        "gender": payload.gender,
+        "date_of_birth": payload.date_of_birth,
+        "passport_photo_url": payload.passport_photo_url,
         "role": staff_role,
         "approval_status": "approved",
-        "is_active": True,
-        "is_suspended": False,
+        "status": account_status,
+        "is_active": is_active,
+        "is_suspended": account_status == "suspended",
+        "created_by": actor_id,
+        "updated_by": actor_id,
         "created_at": now,
         "updated_at": now
     }
@@ -1731,13 +1820,24 @@ async def create_staff(
     staff_doc = {
         "id": str(uuid.uuid4()),
         "school_id": school_id,
+        "school_code": school_code,
         "user_id": user_id,
         "employee_number": payload.employee_number,
+        "national_id": payload.national_id,
+        "gender": payload.gender,
+        "date_of_birth": payload.date_of_birth,
+        "passport_photo_url": payload.passport_photo_url,
+        "tsc_number": payload.tsc_number,
+        "staff_category": payload.staff_category,
         "department": payload.department,
         "position": payload.position,
+        "designation": payload.designation,
+        "role": staff_role,
+        "status": account_status,
         "salary": payload.salary,
         "joined_date": payload.joined_date,
         "created_by": actor_id,
+        "updated_by": actor_id,
         "created_at": now,
         "updated_at": now
     }
@@ -1762,6 +1862,211 @@ async def create_staff(
         },
         message="Staff member created successfully"
     )
+
+
+async def require_school_admin_staff_target(user_id: str, current_user: dict) -> dict:
+    role = normalize_role(current_user.get("role"))
+    school_id = str(current_user.get("school_id") or "").strip()
+    if role != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+    query = resource_lookup(user_id)
+    query["school_id"] = school_id
+    query["role"] = {"$in": ["teacher", "finance", "secretary", "supporting_staff"]}
+    target = await db.users.find_one(query)
+    if not target or target.get("deleted") is True:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    return target
+
+
+@api_router.put("/staff/{user_id}")
+async def update_staff(
+    user_id: str,
+    payload: UpdateStaffPayload,
+    current_user: dict = Depends(get_current_user)
+):
+    target = await require_school_admin_staff_target(user_id, current_user)
+    school_id = target.get("school_id")
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    update = payload.model_dump(exclude_unset=True)
+    user_updates = {}
+    staff_updates = {}
+
+    if "email" in update and update["email"]:
+        email = str(update["email"]).lower().strip()
+        existing = await db.users.find_one({"school_id": school_id, "email": email, "id": {"$ne": target.get("id")}})
+        if existing:
+            raise HTTPException(status_code=400, detail="Staff email already exists")
+        user_updates["email"] = email
+
+    if "employee_number" in update and update["employee_number"]:
+        existing_employee = await db.staff.find_one({
+            "school_id": school_id,
+            "employee_number": update["employee_number"],
+            "user_id": {"$ne": str(target.get("id") or target.get("_id"))},
+        })
+        if existing_employee:
+            raise HTTPException(status_code=400, detail="Employee number already exists")
+
+    if "role" in update and update["role"]:
+        staff_role = normalize_role(update["role"])
+        if staff_role not in ["teacher", "finance", "secretary", "supporting_staff"]:
+            raise HTTPException(status_code=400, detail="Invalid staff role")
+        user_updates["role"] = staff_role
+        staff_updates["role"] = staff_role
+
+    if "password" in update and update["password"]:
+        validate_password_strength(update["password"])
+        user_updates["password_hash"] = hash_password(update["password"])
+
+    if "account_status" in update and update["account_status"]:
+        account_status = str(update["account_status"]).strip().lower()
+        if account_status not in {"active", "suspended", "inactive"}:
+            raise HTTPException(status_code=400, detail="Status must be active, suspended, or inactive")
+        user_updates.update({
+            "status": account_status,
+            "approval_status": "approved" if account_status == "active" else account_status,
+            "is_active": account_status == "active",
+            "is_suspended": account_status == "suspended",
+        })
+        staff_updates["status"] = account_status
+
+    for key in ["full_name", "phone", "national_id", "gender", "date_of_birth", "passport_photo_url"]:
+        if key in update:
+            user_updates[key] = update[key]
+            staff_updates[key] = update[key]
+
+    for key in ["employee_number", "tsc_number", "staff_category", "department", "position", "designation", "salary", "joined_date"]:
+        if key in update:
+            staff_updates[key] = update[key]
+
+    if not user_updates and not staff_updates:
+        raise HTTPException(status_code=400, detail="No valid staff updates provided")
+
+    now = now_utc()
+    if user_updates:
+        user_updates.update({"updated_by": actor_id, "updated_at": now})
+        await db.users.update_one({"id": target.get("id"), "school_id": school_id}, {"$set": user_updates})
+    if staff_updates:
+        staff_updates.update({"updated_by": actor_id, "updated_at": now})
+        await db.staff.update_one(
+            {"school_id": school_id, "user_id": str(target.get("id") or target.get("_id"))},
+            {"$set": staff_updates},
+            upsert=True
+        )
+    await log_security_event("staff_updated", current_user, {"staff_user_id": user_id})
+    return api_success(message="Staff member updated")
+
+
+@api_router.patch("/staff/{user_id}/status")
+async def update_staff_status(
+    user_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    target = await require_school_admin_staff_target(user_id, current_user)
+    requested = str(payload.get("status") or "").strip().lower()
+    if requested not in {"active", "suspended", "inactive", "deactivated"}:
+        raise HTTPException(status_code=400, detail="Status must be active, suspended, inactive, or deactivated")
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    now = now_utc()
+    user_updates = {
+        "status": requested,
+        "approval_status": "approved" if requested == "active" else requested,
+        "is_active": requested == "active",
+        "is_suspended": requested in {"suspended", "deactivated"},
+        "status_reason": payload.get("reason"),
+        "updated_by": actor_id,
+        "updated_at": now,
+    }
+    await db.users.update_one({"id": target.get("id"), "school_id": target.get("school_id")}, {"$set": user_updates})
+    await db.staff.update_one(
+        {"school_id": target.get("school_id"), "user_id": str(target.get("id") or target.get("_id"))},
+        {"$set": {"status": requested, "updated_by": actor_id, "updated_at": now}},
+    )
+    await log_security_event("staff_status_updated", current_user, {"staff_user_id": user_id, "status": requested})
+    return api_success(message=f"Staff member {requested}")
+
+
+@api_router.patch("/staff/{user_id}/activate")
+async def activate_staff(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    return await update_staff_status(user_id, {"status": "active"}, current_user)
+
+
+@api_router.patch("/staff/{user_id}/suspend")
+async def suspend_staff(
+    user_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    return await update_staff_status(user_id, {"status": "suspended", "reason": payload.get("reason")}, current_user)
+
+
+@api_router.patch("/staff/{user_id}/deactivate")
+async def deactivate_staff(
+    user_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    return await update_staff_status(user_id, {"status": "deactivated", "reason": payload.get("reason")}, current_user)
+
+
+@api_router.patch("/staff/{user_id}/reset-password")
+async def reset_staff_password(
+    user_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    target = await require_school_admin_staff_target(user_id, current_user)
+    password = str(payload.get("password") or "")
+    confirm_password = payload.get("confirm_password")
+    if confirm_password is not None and password != str(confirm_password):
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    validate_password_strength(password)
+    await db.users.update_one(
+        {"id": target.get("id"), "school_id": target.get("school_id")},
+        {"$set": {
+            "password_hash": hash_password(password),
+            "password_reset_by": current_user.get("user_id") or current_user.get("id"),
+            "password_reset_at": now_utc(),
+            "updated_at": now_utc(),
+        }}
+    )
+    await log_security_event("staff_password_reset", current_user, {"staff_user_id": user_id})
+    return api_success(message="Staff password reset")
+
+
+@api_router.delete("/staff/{user_id}")
+async def delete_staff(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    target = await require_school_admin_staff_target(user_id, current_user)
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    now = now_utc()
+    await db.users.update_one(
+        {"id": target.get("id"), "school_id": target.get("school_id")},
+        {"$set": {
+            "deleted": True,
+            "deleted_by": actor_id,
+            "deleted_at": now,
+            "status": "deleted",
+            "approval_status": "deactivated",
+            "is_active": False,
+            "is_suspended": True,
+            "updated_at": now,
+        }}
+    )
+    await db.staff.update_one(
+        {"school_id": target.get("school_id"), "user_id": str(target.get("id") or target.get("_id"))},
+        {"$set": {"deleted": True, "deleted_by": actor_id, "deleted_at": now, "status": "deleted", "updated_at": now}},
+    )
+    await log_security_event("staff_deleted", current_user, {"staff_user_id": user_id})
+    return api_success(message="Staff member deleted")
 
 
 # =========================
@@ -2779,7 +3084,7 @@ async def join_school(request: dict):
         password = request.get("password") or ""
         full_name = (request.get("full_name") or "").strip()
         phone = (request.get("phone") or "").strip() or None
-        raw_role = (request.get("role") or "teacher")
+        raw_role = (request.get("role") or "")
         admission_number = (request.get("admission_number") or "").strip() or None
         student_access_code = (request.get("student_access_code") or "").strip().upper() or None
         selected_classes = request.get("selected_classes") or []
@@ -2805,7 +3110,14 @@ async def join_school(request: dict):
         # =========================
         # ROLE VALIDATION
         # =========================
-        allowed_roles = ["teacher", "parent", "finance", "secretary", "supporting_staff"]
+        blocked_staff_roles = ["teacher", "finance", "secretary", "supporting_staff"]
+        if role in blocked_staff_roles:
+            raise HTTPException(
+                status_code=403,
+                detail="Staff accounts can only be created by the School Admin from Staff Management"
+            )
+
+        allowed_roles = ["parent"]
 
         if role not in allowed_roles:
             raise HTTPException(
@@ -2850,29 +3162,7 @@ async def join_school(request: dict):
                 "admission_number": child_admission_number,
             })
 
-        if role == "teacher":
-            if not isinstance(selected_classes, list):
-                raise HTTPException(status_code=400, detail="Selected classes must be a list")
-
-            selected_classes = [
-                str(class_name or "").strip()
-                for class_name in selected_classes
-                if str(class_name or "").strip()
-            ]
-
-            if not selected_classes:
-                raise HTTPException(status_code=400, detail="Select at least one class")
-
-            allowed_classes = set(await get_school_class_names(school_id))
-            invalid_classes = [
-                class_name
-                for class_name in selected_classes
-                if class_name not in allowed_classes
-            ]
-            if invalid_classes:
-                raise HTTPException(status_code=400, detail="One or more selected classes do not belong to this school")
-        else:
-            selected_classes = []
+        selected_classes = []
 
         # =========================
         # DUPLICATE CHECK
@@ -3750,6 +4040,8 @@ async def create_student(
                 "submitted_by": actor_id,
                 "created_at": now
             })
+        else:
+            await ensure_current_report_for_student(school_id, student_data, current_user)
 
         return {
             "success": True,
@@ -4937,6 +5229,32 @@ async def create_exam(
     }
 
     await db.exams.insert_one(exam)
+    await db.exam_sessions.insert_one({
+        **exam,
+        "source": "manual",
+        "status": "active",
+    })
+    archive_query = {
+        "school_id": school_id,
+        "status": "published",
+        "academic_year": request.academic_year,
+        "term": request.term,
+    }
+    if request.class_name:
+        archive_query["class_name"] = request.class_name
+    await db.assessment_reports.update_many(
+        archive_query,
+        {
+            "$set": {
+                "status": "archived",
+                "archived_by": current_user.get("user_id"),
+                "archived_at": now_utc(),
+                "updated_at": now_utc(),
+            },
+            "$push": {"history": report_history_event("archived_by_new_exam", current_user)}
+        }
+    )
+    generation_summary = await bulk_generate_reports_for_exam(school_id, exam, current_user)
     await log_security_event(
         "exam_created",
         current_user,
@@ -4945,14 +5263,427 @@ async def create_exam(
             "class_name": exam.get("class_name"),
             "term": exam.get("term"),
             "academic_year": exam.get("academic_year"),
+            "assessment_reports": generation_summary,
         }
     )
 
     return api_success(
         serialize_doc(exam),
         message="Exam created successfully",
-        exam_id=exam["id"]
+        exam_id=exam["id"],
+        assessment_reports=generation_summary
     )
+
+
+# =====================================================
+# CBC ASSESSMENT REPORTS
+# =====================================================
+
+def assessment_report_query_for_user(current_user: dict) -> dict:
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id")
+    if role == "super_admin":
+        return {}
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+    return {"school_id": school_id}
+
+
+async def get_assessment_report_for_user(report_id: str, current_user: dict) -> dict:
+    query = assessment_report_query_for_user(current_user)
+    query["id"] = report_id
+    report = await db.assessment_reports.find_one(query)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    role = normalize_role(current_user.get("role"))
+    if role in {"student", "parent"}:
+        student = await resolve_portal_student_for_user(current_user, report.get("student_id"))
+        if not student or report.get("status") not in {"published", "archived"}:
+            raise HTTPException(status_code=403, detail="Report is not available")
+    return report
+
+
+async def resolve_portal_student_for_user(current_user: dict, student_id: Optional[str] = None) -> Optional[dict]:
+    school_id = current_user.get("school_id")
+    user_id = current_user.get("user_id")
+    email = current_user.get("email")
+    scope = [{"submitted_by": user_id}]
+    if current_user.get("student_id"):
+        scope.append({"id": current_user.get("student_id")})
+    if current_user.get("admission_number"):
+        scope.append({"admission_number": current_user.get("admission_number")})
+    if current_user.get("student_access_code"):
+        scope.append({"student_access_code": current_user.get("student_access_code")})
+    if email:
+        scope.extend([{"guardian_email": email}, {"secondary_guardian_email": email}])
+    query = {"school_id": school_id, "approval_status": "approved", "$or": scope}
+    if student_id:
+        query["id"] = student_id
+    return await db.students.find_one(query, {"_id": 0})
+
+
+@api_router.post("/assessments/templates")
+async def create_assessment_template(
+    request: AssessmentTemplateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if not school_id and role != "super_admin":
+        raise HTTPException(status_code=403, detail="No school assigned")
+    pathway = normalize_pathway(request.pathway)
+    template = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "class_name": request.class_name,
+        "pathway": pathway,
+        "title": request.title or f"CBC Assessment Template - {request.class_name}",
+        "learning_areas": request.learning_areas,
+        "competencies": request.competencies or build_named_assessments(DEFAULT_COMPETENCIES),
+        "values": request.values or build_named_assessments(DEFAULT_VALUES),
+        "achievement_levels": request.achievement_levels or DEFAULT_ACHIEVEMENT_LEVELS,
+        "is_active": True,
+        "created_by": current_user.get("user_id"),
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    await db.assessment_templates.update_many(
+        {
+            "school_id": school_id,
+            "class_name": request.class_name,
+            "pathway": pathway,
+            "is_active": True,
+        },
+        {"$set": {"is_active": False, "updated_at": now_utc()}}
+    )
+    await db.assessment_templates.insert_one(template)
+    return api_success(serialize_doc(template), message="Template created")
+
+
+@api_router.put("/assessments/templates/{template_id}")
+async def update_assessment_template(
+    template_id: str,
+    request: AssessmentTemplateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {"id": template_id}
+    if role != "super_admin":
+        query["school_id"] = school_id
+    update = {
+        "class_name": request.class_name,
+        "pathway": normalize_pathway(request.pathway),
+        "title": request.title or f"CBC Assessment Template - {request.class_name}",
+        "learning_areas": request.learning_areas,
+        "competencies": request.competencies or build_named_assessments(DEFAULT_COMPETENCIES),
+        "values": request.values or build_named_assessments(DEFAULT_VALUES),
+        "achievement_levels": request.achievement_levels or DEFAULT_ACHIEVEMENT_LEVELS,
+        "updated_at": now_utc(),
+    }
+    result = await db.assessment_templates.update_one(query, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    template = await db.assessment_templates.find_one(query, {"_id": 0})
+    return api_success(template, message="Template updated")
+
+
+@api_router.get("/assessments/templates")
+async def list_assessment_templates(
+    class_name: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    query = assessment_report_query_for_user(current_user)
+    query["is_active"] = True
+    if class_name:
+        query["class_name"] = class_name
+    templates = await db.assessment_templates.find(query, {"_id": 0}).sort("class_name", 1).to_list(500)
+    return api_success(templates, count=len(templates))
+
+
+@api_router.post("/assessments/reports")
+async def create_assessment_report(
+    student_id: str,
+    exam_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    student = await db.students.find_one({"id": student_id, "school_id": school_id, "approval_status": "approved"})
+    exam = await db.exams.find_one({"id": exam_id, "school_id": school_id})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    report = await ensure_assessment_report(school_id, student, exam, current_user)
+    return api_success(public_report_payload(report), message="Report ready")
+
+
+@api_router.get("/assessments/reports")
+async def load_assessment_reports(
+    student_id: Optional[str] = None,
+    exam_id: Optional[str] = None,
+    status: Optional[str] = None,
+    class_name: Optional[str] = None,
+    page: int = 1,
+    limit: int = 25,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+    query = assessment_report_query_for_user(current_user)
+    if student_id:
+        query["student_id"] = student_id
+    if exam_id:
+        query["exam_id"] = exam_id
+    if status and status != "all":
+        query["status"] = status
+    if class_name:
+        query["class_name"] = class_name
+    if role in {"student", "parent"}:
+        student = await resolve_portal_student_for_user(current_user, student_id)
+        if not student:
+            return api_success([], count=0)
+        query["student_id"] = student["id"]
+        query["status"] = {"$in": ["published", "archived"]}
+    skip = max(page - 1, 0) * max(limit, 1)
+    cursor = db.assessment_reports.find(query, {"_id": 0}).sort("updated_at", -1).skip(skip).limit(min(limit, 100))
+    reports = await cursor.to_list(min(limit, 100))
+    total = await db.assessment_reports.count_documents(query)
+    return api_success([public_report_payload(report) for report in reports], count=total, page=page, limit=limit)
+
+
+@api_router.get("/assessments/reports/{report_id}")
+async def load_assessment_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    return api_success(public_report_payload(report))
+
+
+@api_router.put("/assessments/reports/{report_id}/draft")
+async def save_assessment_draft(
+    report_id: str,
+    request: AssessmentReportUpdateRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    if report.get("status") not in CBC_EDITABLE_STATUSES:
+        raise HTTPException(status_code=400, detail="Only draft reports can be edited")
+    update = {k: v for k, v in request.model_dump().items() if v is not None}
+    update["updated_at"] = now_utc()
+    history = report_history_event("draft_saved", current_user)
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": update, "$push": {"history": history}}
+    )
+    await db.assessment_results.update_one(
+        {"school_id": report["school_id"], "report_id": report_id},
+        {"$set": {"school_id": report["school_id"], "report_id": report_id, "student_id": report["student_id"], "exam_id": report["exam_id"], "data": update, "updated_at": now_utc()}},
+        upsert=True,
+    )
+    updated = await db.assessment_reports.find_one({"id": report_id}, {"_id": 0})
+    return api_success(updated, message="Draft saved")
+
+
+@api_router.post("/assessments/reports/{report_id}/submit")
+async def submit_assessment_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    if report.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="Only draft reports can be submitted")
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": {"status": "submitted", "submitted_by": current_user.get("user_id"), "submitted_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("submitted", current_user)}}
+    )
+    return api_success(message="Report submitted")
+
+
+@api_router.post("/assessments/reports/{report_id}/approve")
+async def approve_assessment_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    role = normalize_role(current_user.get("role"))
+    if role != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if report.get("status") not in {"submitted", "draft"}:
+        raise HTTPException(status_code=400, detail="Only draft or submitted reports can be approved")
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": {"status": "approved", "approved_by": current_user.get("user_id"), "approved_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("approved", current_user)}}
+    )
+    return api_success(message="Report approved")
+
+
+@api_router.post("/assessments/reports/{report_id}/reject")
+async def reject_assessment_report(
+    report_id: str,
+    request: AssessmentStatusRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": {"status": "draft", "rejection_reason": request.reason, "updated_at": now_utc()}, "$push": {"history": report_history_event("rejected", current_user, request.reason)}}
+    )
+    return api_success(message="Report returned to draft")
+
+
+@api_router.post("/assessments/reports/{report_id}/publish")
+async def publish_assessment_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if report.get("status") not in {"approved", "submitted"}:
+        raise HTTPException(status_code=400, detail="Only approved reports can be published")
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": {"status": "published", "published_by": current_user.get("user_id"), "published_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("published", current_user)}}
+    )
+    recipients = ["student", "parent", "teacher"]
+    await db.notifications.insert_many([
+        {
+            "id": str(uuid.uuid4()),
+            "school_id": report["school_id"],
+            "student_id": report["student_id"],
+            "report_id": report_id,
+            "recipient_type": recipient,
+            "title": "CBC report published",
+            "message": f"{report.get('exam_name')} report is now available.",
+            "read": False,
+            "created_at": now_utc(),
+        }
+        for recipient in recipients
+    ])
+    return api_success(message="Report published")
+
+
+@api_router.post("/assessments/reports/{report_id}/archive")
+async def archive_assessment_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    await db.assessment_reports.update_one(
+        {"id": report_id, "school_id": report["school_id"]},
+        {"$set": {"status": "archived", "archived_by": current_user.get("user_id"), "archived_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("archived", current_user)}}
+    )
+    return api_success(message="Report archived")
+
+
+@api_router.get("/assessments/reports/{report_id}/history")
+async def fetch_report_history(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    return api_success(report.get("history") or [], count=len(report.get("history") or []))
+
+
+@api_router.get("/assessments/students/{student_id}/reports")
+async def fetch_student_reports(
+    student_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id")
+    if role in {"student", "parent"}:
+        student = await resolve_portal_student_for_user(current_user, student_id)
+        if not student:
+            raise HTTPException(status_code=403, detail="Access denied")
+        query = {"school_id": school_id, "student_id": student_id, "status": {"$in": ["published", "archived"]}}
+    else:
+        query = assessment_report_query_for_user(current_user)
+        query["student_id"] = student_id
+    reports = await db.assessment_reports.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return api_success([public_report_payload(report) for report in reports], count=len(reports))
+
+
+@api_router.post("/assessments/reports/bulk-generate")
+async def bulk_generate_assessment_reports(
+    exam_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    exam = await db.exams.find_one({"id": exam_id, "school_id": school_id})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    summary = await bulk_generate_reports_for_exam(school_id, exam, current_user)
+    return api_success(summary, message="Reports generated")
+
+
+@api_router.post("/assessments/reports/bulk-publish")
+async def bulk_publish_assessment_reports(
+    exam_id: str,
+    class_name: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    school_id = current_user.get("school_id")
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {"school_id": school_id, "exam_id": exam_id, "status": {"$in": ["approved", "submitted"]}}
+    if class_name:
+        query["class_name"] = class_name
+    reports = await db.assessment_reports.find(query).to_list(10000)
+    for report in reports:
+        await db.assessment_reports.update_one(
+            {"id": report["id"], "school_id": school_id},
+            {"$set": {"status": "published", "published_by": current_user.get("user_id"), "published_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("bulk_published", current_user)}}
+        )
+    return api_success({"published": len(reports)}, message="Reports published")
+
+
+@api_router.post("/assessments/reports/promote")
+async def promote_reports(
+    request: ProgressStudentsRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    return await progress_students(request, current_user)
+
+
+@api_router.get("/assessments/reports/{report_id}/pdf")
+async def generate_report_pdf(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    return {
+        "success": True,
+        "content_type": "application/pdf",
+        "filename": f"{report.get('learner_details', {}).get('admission_number') or report_id}-cbc-report.pdf",
+        "report": public_report_payload(report),
+        "pdf_layout": {
+            "paper": "A4",
+            "orientation": "landscape",
+            "features": ["school_logo", "watermark", "qr_code", "student_photo", "page_numbering", "automatic_date", "digital_signature"],
+        }
+    }
 
 
 # OLD LOGIN - DISABLED
@@ -5948,6 +6679,8 @@ async def get_my_portal_data(
                 "attendance": [],
                 "payments": [],
                 "announcements": [],
+                "assessment_reports": [],
+                "report_notifications": [],
                 "fee_balance": 0
             }
 
@@ -6104,6 +6837,26 @@ async def get_my_portal_data(
             elif target_class and target_class == student.get("class_name"):
                 visible_announcements.append(announcement)
 
+        assessment_reports = await db.assessment_reports.find(
+            {
+                "school_id": school_id,
+                "student_id": student_id,
+                "status": {"$in": ["published", "archived"]},
+            },
+            {"_id": 0}
+        ).sort("published_at", -1).to_list(500)
+
+        report_notifications = await db.notifications.find(
+            {
+                "school_id": school_id,
+                "student_id": student_id,
+                "recipient_type": {"$in": ["student", "parent"]},
+                "report_id": {"$exists": True},
+                "read": False,
+            },
+            {"_id": 0}
+        ).sort("created_at", -1).to_list(100)
+
         return {
             "student": student,
             "children": children,
@@ -6113,6 +6866,8 @@ async def get_my_portal_data(
             "attendance": attendance_records,
             "payments": payments,
             "announcements": visible_announcements,
+            "assessment_reports": [public_report_payload(report) for report in assessment_reports],
+            "report_notifications": report_notifications,
             "fee_balance": fee_balance,
             "fee_status": student.get("fee_status") if student.get("fee_status_visible") else None,
             "fee_status_note": student.get("fee_status_note") if student.get("fee_status_visible") else None
@@ -6747,6 +7502,390 @@ GRADE_ORDER = [
     "Grade 10", "Grade 11", "Grade 12"
 ]
 
+CBC_REPORT_STATUSES = {"draft", "submitted", "approved", "published", "archived"}
+CBC_EDITABLE_STATUSES = {"draft"}
+SENIOR_PATHWAYS = {"stem", "social_sciences", "arts_sports_science"}
+DEFAULT_ACHIEVEMENT_LEVELS = [
+    {"code": "EE", "name": "Exceeding Expectations", "min_score": 80, "max_score": 100},
+    {"code": "ME", "name": "Meeting Expectations", "min_score": 60, "max_score": 79},
+    {"code": "AE", "name": "Approaching Expectations", "min_score": 40, "max_score": 59},
+    {"code": "BE", "name": "Below Expectations", "min_score": 0, "max_score": 39},
+]
+DEFAULT_COMPETENCIES = [
+    "Communication & Collaboration",
+    "Critical Thinking & Problem Solving",
+    "Creativity & Imagination",
+    "Citizenship",
+    "Digital Literacy",
+    "Learning to Learn",
+    "Self-Efficacy",
+]
+DEFAULT_VALUES = ["Respect", "Responsibility", "Integrity", "Unity", "Peace", "Love", "Patriotism"]
+DEFAULT_CO_CURRICULAR = {
+    "music": None,
+    "drama": None,
+    "sports": None,
+    "debate": None,
+    "scouts": None,
+    "clubs": None,
+    "other_activities": None,
+    "teacher_remarks": "",
+}
+
+
+def normalize_class_key(class_name: Optional[str]) -> str:
+    value = str(class_name or "").strip().lower().replace("-", " ")
+    value = re.sub(r"\s+", " ", value)
+    if value in {"pp1", "pre primary 1", "preprimary 1"}:
+        return "pp1"
+    if value in {"pp2", "pre primary 2", "preprimary 2"}:
+        return "pp2"
+    match = re.search(r"(\d+)", value)
+    return f"grade_{int(match.group(1))}" if match else value.replace(" ", "_")
+
+
+def grade_number(class_name: Optional[str]) -> Optional[int]:
+    key = normalize_class_key(class_name)
+    if key.startswith("grade_"):
+        return int(key.split("_", 1)[1])
+    return None
+
+
+def default_learning_area_names(class_name: str, pathway: Optional[str] = None) -> List[str]:
+    key = normalize_class_key(class_name)
+    number = grade_number(class_name)
+    if key in {"pp1", "pp2"}:
+        return [
+            "Language Activities",
+            "Mathematical Activities",
+            "Environmental Activities",
+            "Psychomotor and Creative Activities",
+            "Religious Education Activities",
+        ]
+    if number and 1 <= number <= 3:
+        return [
+            "English Language Activities",
+            "Kiswahili Language Activities",
+            "Mathematical Activities",
+            "Environmental Activities",
+            "Creative Activities",
+            "Religious Education",
+        ]
+    if number and 4 <= number <= 6:
+        return [
+            "English",
+            "Kiswahili",
+            "Mathematics",
+            "Science & Technology",
+            "Agriculture",
+            "Social Studies",
+            "Creative Arts",
+            "Health Education",
+            "Religious Education",
+        ]
+    if number and 7 <= number <= 9:
+        return [
+            "English",
+            "Kiswahili",
+            "Mathematics",
+            "Integrated Science",
+            "Business Studies",
+            "Agriculture",
+            "Social Studies",
+            "Health Education",
+            "Pre-Technical Studies",
+            "Life Skills",
+            "Religious Education",
+            "Visual Arts",
+            "Performing Arts",
+            "Sports & Physical Education",
+        ]
+    if number and 10 <= number <= 12:
+        normalized_pathway = normalize_pathway(pathway) or "stem"
+        senior_common = ["English", "Kiswahili", "Community Service Learning", "Physical Education"]
+        senior_pathways = {
+            "stem": ["Mathematics", "Biology", "Chemistry", "Physics", "Computer Science", "Agriculture"],
+            "social_sciences": ["History & Citizenship", "Geography", "Business Studies", "Religious Education", "Economics"],
+            "arts_sports_science": ["Fine Arts", "Music & Dance", "Theatre & Film", "Sports Science", "Media Studies"],
+        }
+        return senior_common + senior_pathways.get(normalized_pathway, senior_pathways["stem"])
+    return ["English", "Kiswahili", "Mathematics", "Science", "Religious Education"]
+
+
+def build_learning_areas(names: List[str]) -> List[dict]:
+    return [
+        {
+            "name": name,
+            "strands": [],
+            "sub_strands": [],
+            "score": None,
+            "achievement_level": "",
+            "teacher_remarks": "",
+            "overall_grade": "",
+        }
+        for name in names
+    ]
+
+
+def build_named_assessments(names: List[str]) -> List[dict]:
+    return [{"name": name, "achievement_level": "", "teacher_remarks": ""} for name in names]
+
+
+def blank_attendance() -> dict:
+    return {
+        "days_open": None,
+        "days_present": None,
+        "days_absent": None,
+        "late_coming": None,
+        "medical_leave": None,
+        "other_absence": None,
+    }
+
+
+def normalize_pathway(pathway: Optional[str]) -> Optional[str]:
+    if not pathway:
+        return None
+    normalized = str(pathway).strip().lower().replace(" ", "_").replace("&", "and")
+    aliases = {
+        "arts_and_sports_science": "arts_sports_science",
+        "arts_sports": "arts_sports_science",
+        "social_science": "social_sciences",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def student_age(student: dict) -> Optional[int]:
+    raw = student.get("date_of_birth")
+    if not raw:
+        return None
+    try:
+        dob = datetime.fromisoformat(raw) if isinstance(raw, str) else raw
+        today = now_utc().date()
+        return today.year - dob.date().year - ((today.month, today.day) < (dob.date().month, dob.date().day))
+    except Exception:
+        return None
+
+
+def report_history_event(action: str, user: dict, reason: Optional[str] = None) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "action": action,
+        "reason": reason,
+        "user_id": user.get("user_id") or user.get("id"),
+        "user_name": user.get("full_name"),
+        "role": normalize_role(user.get("role")),
+        "created_at": now_utc(),
+    }
+
+
+def public_report_payload(report: dict) -> dict:
+    payload = serialize_doc(report)
+    payload["download_url"] = f"/api/assessments/reports/{report.get('id')}/pdf"
+    return payload
+
+
+async def get_or_create_assessment_template(
+    school_id: str,
+    class_name: str,
+    pathway: Optional[str] = None,
+    current_user: Optional[dict] = None,
+) -> dict:
+    normalized_pathway = normalize_pathway(pathway)
+    query = {
+        "school_id": school_id,
+        "class_name": class_name,
+        "is_active": True,
+    }
+    number = grade_number(class_name)
+    if number and number >= 10:
+        query["pathway"] = normalized_pathway or "stem"
+    else:
+        query["$or"] = [{"pathway": None}, {"pathway": ""}, {"pathway": {"$exists": False}}]
+
+    template = await db.assessment_templates.find_one(query)
+    if template:
+        return template
+
+    template = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "class_name": class_name,
+        "pathway": query.get("pathway"),
+        "title": f"CBC Assessment Template - {class_name}",
+        "learning_areas": build_learning_areas(default_learning_area_names(class_name, normalized_pathway)),
+        "competencies": build_named_assessments(DEFAULT_COMPETENCIES),
+        "values": build_named_assessments(DEFAULT_VALUES),
+        "achievement_levels": DEFAULT_ACHIEVEMENT_LEVELS,
+        "is_active": True,
+        "created_by": (current_user or {}).get("user_id"),
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    await db.assessment_templates.insert_one(template)
+    return template
+
+
+async def build_report_from_template(
+    school: dict,
+    student: dict,
+    exam: dict,
+    template: dict,
+    current_user: Optional[dict] = None,
+) -> dict:
+    user_id = (current_user or {}).get("user_id") or (current_user or {}).get("id")
+    return {
+        "id": str(uuid.uuid4()),
+        "school_id": student["school_id"],
+        "student_id": student["id"],
+        "exam_id": exam["id"],
+        "template_id": template["id"],
+        "academic_year": exam.get("academic_year"),
+        "term": exam.get("term"),
+        "exam_name": exam.get("name"),
+        "exam_number": exam.get("exam_number"),
+        "class_name": student.get("class_name") or exam.get("class_name"),
+        "stream": student.get("stream"),
+        "pathway": template.get("pathway"),
+        "status": "draft",
+        "learner_details": {
+            "full_name": student.get("full_name"),
+            "admission_number": student.get("admission_number"),
+            "upi": student.get("upi") or student.get("birth_certificate_no"),
+            "photo_url": student.get("passport_photo_url"),
+            "class_name": student.get("class_name"),
+            "stream": student.get("stream"),
+            "age": student_age(student),
+            "gender": student.get("gender"),
+        },
+        "school_details": {
+            "name": school.get("name") if school else None,
+            "logo_url": (school.get("logo_url") or school.get("logo")) if school else None,
+            "motto": school.get("motto") if school else None,
+            "phone": school.get("phone") if school else None,
+            "email": school.get("email") if school else None,
+            "address": school.get("address") if school else None,
+            "principal_name": school.get("principal_name") if school else None,
+        },
+        "learning_areas": template.get("learning_areas") or [],
+        "competencies": template.get("competencies") or build_named_assessments(DEFAULT_COMPETENCIES),
+        "values": template.get("values") or build_named_assessments(DEFAULT_VALUES),
+        "achievement_levels": template.get("achievement_levels") or DEFAULT_ACHIEVEMENT_LEVELS,
+        "attendance": blank_attendance(),
+        "co_curricular": DEFAULT_CO_CURRICULAR.copy(),
+        "teacher_remarks": "",
+        "principal_remarks": "",
+        "parent_acknowledgement": {"parent_name": "", "signature": "", "date": None},
+        "history": [report_history_event("created", current_user or {})],
+        "created_by": user_id,
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+
+
+async def ensure_assessment_report(
+    school_id: str,
+    student: dict,
+    exam: dict,
+    current_user: Optional[dict] = None,
+) -> Optional[dict]:
+    if not student.get("class_name") or str(student.get("status") or "active") != "active":
+        return None
+    existing = await db.assessment_reports.find_one({
+        "school_id": school_id,
+        "student_id": student["id"],
+        "exam_id": exam["id"],
+        "class_name": student.get("class_name"),
+    })
+    if existing:
+        return existing
+    school = await db.schools.find_one({"id": school_id}, {"_id": 0})
+    template = await get_or_create_assessment_template(
+        school_id,
+        student.get("class_name"),
+        student.get("pathway") or student.get("senior_pathway"),
+        current_user,
+    )
+    report = await build_report_from_template(school, student, exam, template, current_user)
+    await db.assessment_reports.insert_one(report)
+    await db.report_history.insert_one({
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "student_id": student["id"],
+        "report_id": report["id"],
+        "exam_id": exam["id"],
+        "academic_year": exam.get("academic_year"),
+        "term": exam.get("term"),
+        "exam_name": exam.get("name"),
+        "class_name": report.get("class_name"),
+        "action": "created",
+        "created_at": now_utc(),
+    })
+    return report
+
+
+async def bulk_generate_reports_for_exam(
+    school_id: str,
+    exam: dict,
+    current_user: Optional[dict] = None,
+) -> dict:
+    query = {"school_id": school_id, "approval_status": "approved", "status": "active"}
+    if exam.get("class_name"):
+        query["class_name"] = exam.get("class_name")
+    students = await db.students.find(query).to_list(length=10000)
+    generated = 0
+    existing = 0
+    for student in students:
+        before = await db.assessment_reports.find_one({
+            "school_id": school_id,
+            "student_id": student["id"],
+            "exam_id": exam["id"],
+            "class_name": student.get("class_name"),
+        }, {"_id": 1})
+        report = await ensure_assessment_report(school_id, student, exam, current_user)
+        if report and before:
+            existing += 1
+        elif report:
+            generated += 1
+    return {"generated": generated, "existing": existing, "total": generated + existing}
+
+
+async def ensure_current_report_for_student(
+    school_id: str,
+    student: dict,
+    current_user: Optional[dict] = None,
+    academic_year: Optional[str] = None,
+) -> Optional[dict]:
+    if not student.get("class_name") or str(student.get("status") or "active") != "active":
+        return None
+    exam = await db.exams.find_one(
+        {"school_id": school_id, "class_name": student.get("class_name")},
+        sort=[("exam_date", -1), ("created_at", -1)]
+    )
+    if not exam:
+        now = now_utc()
+        exam = {
+            "id": str(uuid.uuid4()),
+            "school_id": school_id,
+            "name": "Current CBC Assessment",
+            "class_name": student.get("class_name"),
+            "year_of_study": student.get("year_of_study"),
+            "term": "Term 1",
+            "exam_number": "Auto",
+            "academic_year": academic_year or str(now.year),
+            "exam_date": now,
+            "created_by": (current_user or {}).get("user_id"),
+            "auto_created": True,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.exams.insert_one(exam)
+        await db.exam_sessions.insert_one({
+            **exam,
+            "source": "assessment_auto_current",
+            "status": "active",
+        })
+    return await ensure_assessment_report(school_id, student, exam, current_user)
+
 # ─── Student Progression System ───────────────────────────────────
 
 @api_router.post("/admin/progress-students")
@@ -6833,6 +7972,17 @@ async def progress_students(
                 )
 
                 progressed += 1
+                promoted_student = {
+                    **student,
+                    "class_name": next_class,
+                    "status": "active",
+                }
+                await ensure_current_report_for_student(
+                    school_id,
+                    promoted_student,
+                    current_user,
+                    request.academic_year,
+                )
 
                 archived.append({
                     "name": student.get("full_name"),
@@ -6957,6 +8107,18 @@ async def ensure_database_indexes():
         (db.fee_structures, [("school_id", 1), ("class_name", 1)], {"name": "fee_structures_school_class_idx"}),
         (db.timetable, [("school_id", 1), ("class_name", 1), ("day_order", 1)], {"name": "timetable_school_class_day_idx"}),
         (db.inventory, [("school_id", 1), ("category", 1)], {"name": "inventory_school_category_idx"}),
+        (db.assessment_templates, [("school_id", 1), ("class_name", 1), ("pathway", 1), ("is_active", 1)], {"name": "assessment_templates_lookup_idx"}),
+        (db.assessment_reports, [("school_id", 1), ("student_id", 1), ("exam_id", 1), ("class_name", 1)], {"unique": True, "name": "assessment_reports_unique_student_exam_class_idx"}),
+        (db.assessment_reports, [("school_id", 1), ("status", 1), ("updated_at", -1)], {"name": "assessment_reports_status_idx"}),
+        (db.assessment_reports, [("school_id", 1), ("class_name", 1), ("exam_id", 1)], {"name": "assessment_reports_class_exam_idx"}),
+        (db.assessment_results, [("school_id", 1), ("report_id", 1)], {"name": "assessment_results_report_idx"}),
+        (db.competencies, [("school_id", 1), ("report_id", 1)], {"name": "competencies_report_idx"}),
+        (db.values, [("school_id", 1), ("report_id", 1)], {"name": "values_report_idx"}),
+        (db.teacher_comments, [("school_id", 1), ("report_id", 1)], {"name": "teacher_comments_report_idx"}),
+        (db.principal_comments, [("school_id", 1), ("report_id", 1)], {"name": "principal_comments_report_idx"}),
+        (db.report_history, [("school_id", 1), ("student_id", 1), ("created_at", -1)], {"name": "report_history_student_idx"}),
+        (db.exam_sessions, [("school_id", 1), ("academic_year", 1), ("term", 1), ("class_name", 1)], {"name": "exam_sessions_school_term_class_idx"}),
+        (db.notifications, [("school_id", 1), ("student_id", 1), ("read", 1), ("created_at", -1)], {"name": "notifications_student_read_idx"}),
     ]
 
     for collection, keys, options in index_specs:

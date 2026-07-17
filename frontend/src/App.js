@@ -35,6 +35,7 @@ import StaffPage from "@/pages/StaffPage";
 import FeesPage from "@/pages/FeesPage";
 import AttendancePage from "@/pages/AttendancePage";
 import ExamsPage from "@/pages/ExamsPage";
+import AssessmentReportsPage from "@/pages/AssessmentReportsPage";
 import TimetablePage from "@/pages/TimetablePage";
 import InventoryPage from "@/pages/InventoryPage";
 import SupportPage from "@/pages/SupportPage";
@@ -320,6 +321,12 @@ school_profile: ["super_admin", "school_admin"],
     "teacher",
   ],
 
+  assessments: [
+    "super_admin",
+    "school_admin",
+    "teacher",
+  ],
+
   timetable: [
     "super_admin",
     "school_admin",
@@ -596,6 +603,16 @@ function App() {
                 element={
                   <RoleProtectedRoute routeKey="exams">
                     <ExamsPage />
+                  </RoleProtectedRoute>
+                }
+              />
+
+              {/* CBC ASSESSMENTS */}
+              <Route
+                path="assessments"
+                element={
+                  <RoleProtectedRoute routeKey="assessments">
+                    <AssessmentReportsPage />
                   </RoleProtectedRoute>
                 }
               />

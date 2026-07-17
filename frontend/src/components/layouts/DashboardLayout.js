@@ -25,6 +25,7 @@ import {
   FileText,
   Building2,
   LifeBuoy,
+  ClipboardCheck,
 } from "lucide-react";
 
 // =========================
@@ -106,6 +107,12 @@ const MENU_ITEMS = [
     icon: GraduationCap,
     label: "Exams & Results",
     path: "/app/exams",
+    roles: ["school_admin", "teacher"],
+  },
+  {
+    icon: ClipboardCheck,
+    label: "CBC Reports",
+    path: "/app/assessments",
     roles: ["school_admin", "teacher"],
   },
   {

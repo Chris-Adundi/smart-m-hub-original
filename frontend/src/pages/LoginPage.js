@@ -879,16 +879,16 @@ const selectedRoleData = roles.find(
                   : "Sign In"}
               </Button>
 
-              {selectedRole !== "super_admin" && (
+              {selectedRole === "student" && (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-center">
                   <p className="text-sm text-slate-300">
-                    First time using this school portal?
+                    Parent or guardian access needed?
                   </p>
                   <Link
                     to={`/join-school${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`}
                     className="mt-2 inline-flex text-sm font-semibold text-emerald-300 hover:text-emerald-200"
                   >
-                    Sign up and wait for school admin approval
+                    Request parent/guardian access
                   </Link>
                 </div>
               )}

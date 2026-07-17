@@ -86,6 +86,14 @@ class CBEGrade(str, Enum):
     BE2 = "BE2"
 
 
+class CBCReportStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
 # =========================
 # BASE UTILS
 # =========================
@@ -472,3 +480,60 @@ class InventoryItem(BaseModel):
     category: Optional[str] = None
 
     created_at: datetime = Field(default_factory=now_utc)
+
+
+# =========================
+# CBC ASSESSMENT REPORTING
+# =========================
+
+class AssessmentTemplate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=gen_id)
+    school_id: str
+    class_name: str
+    pathway: Optional[str] = None
+    title: Optional[str] = None
+    learning_areas: List[dict] = Field(default_factory=list)
+    competencies: List[dict] = Field(default_factory=list)
+    values: List[dict] = Field(default_factory=list)
+    achievement_levels: List[dict] = Field(default_factory=list)
+    is_active: bool = True
+    created_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
+
+
+class AssessmentReport(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=gen_id)
+    school_id: str
+    student_id: str
+    exam_id: str
+    template_id: str
+    academic_year: str
+    term: str
+    exam_name: str
+    class_name: str
+    stream: Optional[str] = None
+    pathway: Optional[str] = None
+    status: CBCReportStatus = CBCReportStatus.DRAFT
+    learner_details: dict = Field(default_factory=dict)
+    school_details: dict = Field(default_factory=dict)
+    learning_areas: List[dict] = Field(default_factory=list)
+    competencies: List[dict] = Field(default_factory=list)
+    values: List[dict] = Field(default_factory=list)
+    attendance: dict = Field(default_factory=dict)
+    co_curricular: dict = Field(default_factory=dict)
+    teacher_remarks: Optional[str] = None
+    principal_remarks: Optional[str] = None
+    parent_acknowledgement: dict = Field(default_factory=dict)
+    history: List[dict] = Field(default_factory=list)
+    created_by: Optional[str] = None
+    submitted_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    published_by: Optional[str] = None
+    archived_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
