@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
+DEFAULT_QUERY_MAX_TIME_MS = 5_000
 
 
 def bounded_limit(limit: Optional[int], *, default: int = DEFAULT_PAGE_SIZE, maximum: int = MAX_PAGE_SIZE) -> int:
@@ -44,6 +45,12 @@ def pagination_meta(page: int, limit: int, total: Optional[int] = None, returned
         meta["total"] = total
         meta["has_next"] = page * limit < total
     return meta
+
+
+def apply_query_controls(cursor: Any, *, page: int, limit: int, sort: Optional[list[tuple[str, int]]] = None, max_time_ms: int = DEFAULT_QUERY_MAX_TIME_MS):
+    if sort:
+        cursor = cursor.sort(sort)
+    return cursor.skip(skip_for_page(page, limit)).limit(limit).max_time_ms(max_time_ms)
 
 
 def projection(*fields: str, include_id: bool = False) -> dict:

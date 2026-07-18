@@ -1,19 +1,20 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { getAuthToken, isSuperAdmin } from "./auth/superAdminAuth";
 
 import MainLayout from "./layouts/MainLayout";
 
-import DashboardHome from "./pages/DashboardHome";
-import Schools from "./pages/Schools";
-import SchoolDetails from "./pages/SchoolDetails";
-import Payments from "./pages/Payments";
-import Analytics from "./pages/Analytics";
-import SupportTickets from "./pages/SupportTickets";
-import SystemHealth from "./pages/SystemHealth";
-import Approvals from "./pages/Approvals";
-import PlatformControl from "./pages/PlatformControl";
-import DiagnosticsCenter from "./pages/DiagnosticsCenter";
-import Login from "./pages/Login";
+const DashboardHome = lazy(() => import("./pages/DashboardHome"));
+const Schools = lazy(() => import("./pages/Schools"));
+const SchoolDetails = lazy(() => import("./pages/SchoolDetails"));
+const Payments = lazy(() => import("./pages/Payments"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const SupportTickets = lazy(() => import("./pages/SupportTickets"));
+const SystemHealth = lazy(() => import("./pages/SystemHealth"));
+const Approvals = lazy(() => import("./pages/Approvals"));
+const PlatformControl = lazy(() => import("./pages/PlatformControl"));
+const DiagnosticsCenter = lazy(() => import("./pages/DiagnosticsCenter"));
+const Login = lazy(() => import("./pages/Login"));
 
 function RequireSuperAdmin({ children }) {
   if (!getAuthToken() || !isSuperAdmin()) {
@@ -26,6 +27,7 @@ function RequireSuperAdmin({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <Suspense fallback={<div style={{ padding: 24, color: "#4b5563" }}>Loading...</div>}>
       <Routes>
         <Route path="/login" element={<Login />} />
 
@@ -47,6 +49,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

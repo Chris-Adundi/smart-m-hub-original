@@ -10,16 +10,15 @@ import {
 
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
-import { useEffect, useState, useMemo } from "react";
+import { lazy, Suspense, useEffect, useState, useMemo } from "react";
 // ======================
 // PAGES
 // ======================
-import LandingPage from "@/pages/LandingPage";
-import SchoolProfilePage from "@/pages/SchoolProfilePage";
-
-import LoginPage from "@/pages/LoginPage";
-import RegisterPage from "@/pages/RegisterPage";
-import JoinSchoolPage from "@/pages/JoinSchoolPage";
+const LandingPage = lazy(() => import("@/pages/LandingPage"));
+const SchoolProfilePage = lazy(() => import("@/pages/SchoolProfilePage"));
+const LoginPage = lazy(() => import("@/pages/LoginPage"));
+const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
+const JoinSchoolPage = lazy(() => import("@/pages/JoinSchoolPage"));
 
 // ======================
 // LAYOUT
@@ -29,26 +28,25 @@ import DashboardLayout from "@/components/layouts/DashboardLayout";
 // ======================
 // CORE
 // ======================
-import Dashboard from "@/pages/Dashboard";
-import StudentsPage from "@/pages/StudentsPage";
-import StaffPage from "@/pages/StaffPage";
-import FeesPage from "@/pages/FeesPage";
-import AttendancePage from "@/pages/AttendancePage";
-import ExamsPage from "@/pages/ExamsPage";
-import AssessmentReportsPage from "@/pages/AssessmentReportsPage";
-import TimetablePage from "@/pages/TimetablePage";
-import InventoryPage from "@/pages/InventoryPage";
-import SupportPage from "@/pages/SupportPage";
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const StudentsPage = lazy(() => import("@/pages/StudentsPage"));
+const StaffPage = lazy(() => import("@/pages/StaffPage"));
+const FeesPage = lazy(() => import("@/pages/FeesPage"));
+const AttendancePage = lazy(() => import("@/pages/AttendancePage"));
+const ExamsPage = lazy(() => import("@/pages/ExamsPage"));
+const AssessmentReportsPage = lazy(() => import("@/pages/AssessmentReportsPage"));
+const TimetablePage = lazy(() => import("@/pages/TimetablePage"));
+const InventoryPage = lazy(() => import("@/pages/InventoryPage"));
+const SupportPage = lazy(() => import("@/pages/SupportPage"));
 
 // ======================
 // PORTALS
 // ======================
-import StudentPortal from "@/pages/StudentPortal";
-import TeacherPortal from "@/pages/TeacherPortal";
-import FinancePortal from "@/pages/FinancePortal";
-import SecretaryPortal from "@/pages/SecretaryPortal";
-
-import AnnouncementsPage from "@/pages/AnnouncementsPage";
+const StudentPortal = lazy(() => import("@/pages/StudentPortal"));
+const TeacherPortal = lazy(() => import("@/pages/TeacherPortal"));
+const FinancePortal = lazy(() => import("@/pages/FinancePortal"));
+const SecretaryPortal = lazy(() => import("@/pages/SecretaryPortal"));
+const AnnouncementsPage = lazy(() => import("@/pages/AnnouncementsPage"));
 
 // ======================
 // BACKEND (SINGLE SOURCE OF TRUTH)
@@ -487,6 +485,12 @@ const SafeDashboardLayout = () => {
   return <DashboardLayout key={location.pathname} />;
 };
 
+const RouteFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-600">
+    Loading...
+  </div>
+);
+
 // ======================
 // APP
 // ======================
@@ -494,6 +498,7 @@ function App() {
   return (
     <div className="App">
       <BrowserRouter>
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
 
           {/* ======================
@@ -718,6 +723,7 @@ function App() {
           />
 
         </Routes>
+        </Suspense>
       </BrowserRouter>
 
       <Toaster

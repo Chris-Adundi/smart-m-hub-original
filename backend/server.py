@@ -79,11 +79,11 @@ from security_controls import (
     verify_totp,
 )
 from db_controls import (
+    apply_query_controls,
     bounded_limit,
     bounded_page,
     exclude_private_projection,
     pagination_meta,
-    skip_for_page,
 )
 from services.dashboard_summaries import get_school_dashboard_summary
 
@@ -1841,12 +1841,11 @@ async def get_staff(
     page = bounded_page(page)
     limit = bounded_limit(limit, default=100, maximum=200)
     total = await db.users.count_documents(query)
-    staff = await db.users.find(
+    staff_cursor = db.users.find(
         query,
         exclude_private_projection()
-    ).sort(
-        "created_at", -1
-    ).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
+    )
+    staff = await apply_query_controls(staff_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
 
     staff_user_ids = [str(member.get("id") or member.get("_id")) for member in staff]
     staff_profiles = await db.staff.find(
@@ -4530,10 +4529,11 @@ async def get_students(
     page = bounded_page(page)
     limit = bounded_limit(limit, default=100, maximum=200)
     total = await db.students.count_documents(query)
-    students = await db.students.find(
+    students_cursor = db.students.find(
         query,
         {"_id": 0}
-    ).sort("created_at", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
+    )
+    students = await apply_query_controls(students_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
 
     for student in students:
         student["education_level"] = student.get("education_level") or classify_school_level(student.get("class_name"))
@@ -5128,10 +5128,11 @@ async def get_payments(
         page = bounded_page(page)
         limit = bounded_limit(limit, default=100, maximum=200)
         total = await db.payments.count_documents(query)
-        payments = await db.payments.find(
+        payments_cursor = db.payments.find(
             query,
             {"_id": 0}
-        ).sort("created_at", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(limit)
+        )
+        payments = await apply_query_controls(payments_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
 
         return {
             "success": True,
@@ -5545,10 +5546,11 @@ async def get_attendance(
         page = bounded_page(page)
         limit = bounded_limit(limit, default=100, maximum=200)
         total = await db.attendance.count_documents(query)
-        attendance_records = await db.attendance.find(
+        attendance_cursor = db.attendance.find(
             query,
             {"_id": 0}
-        ).sort("date", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
+        )
+        attendance_records = await apply_query_controls(attendance_cursor, page=page, limit=limit, sort=[("date", -1)]).to_list(length=limit)
 
         return {
             "success": True,
@@ -5602,6 +5604,8 @@ async def archive_old_attendance(current_user: dict = Depends(get_current_user))
 
 @api_router.get("/exams")
 async def get_exams(
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
     school_id = current_user.get("school_id")
@@ -5614,12 +5618,17 @@ async def get_exams(
     if role not in ["school_admin", "teacher", "student", "parent", "super_admin"]:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
-    exams = await db.exams.find(
-        {"school_id": school_id},
+    page = bounded_page(page)
+    limit = bounded_limit(limit, default=100, maximum=200)
+    query = {"school_id": school_id}
+    total = await db.exams.count_documents(query)
+    exams_cursor = db.exams.find(
+        query,
         {"_id": 0}
-    ).sort("exam_date", -1).to_list(length=1000)
+    )
+    exams = await apply_query_controls(exams_cursor, page=page, limit=limit, sort=[("exam_date", -1)]).to_list(length=limit)
 
-    return api_success(serialize_docs(exams), count=len(exams))
+    return api_success(serialize_docs(exams), count=len(exams), pagination=pagination_meta(page, limit, total, len(exams)))
 
 
 @api_router.post("/exams")
@@ -5893,11 +5902,18 @@ async def load_assessment_reports(
             return api_success([], count=0)
         query["student_id"] = student["id"]
         query["status"] = {"$in": ["published", "archived"]}
-    skip = max(page - 1, 0) * max(limit, 1)
-    cursor = db.assessment_reports.find(query, {"_id": 0}).sort("updated_at", -1).skip(skip).limit(min(limit, 100))
-    reports = await cursor.to_list(min(limit, 100))
+    page = bounded_page(page)
+    limit = bounded_limit(limit, default=25, maximum=100)
+    cursor = db.assessment_reports.find(query, {"_id": 0})
+    reports = await apply_query_controls(cursor, page=page, limit=limit, sort=[("updated_at", -1)]).to_list(length=limit)
     total = await db.assessment_reports.count_documents(query)
-    return api_success([public_report_payload(report) for report in reports], count=total, page=page, limit=limit)
+    return api_success(
+        [public_report_payload(report) for report in reports],
+        count=total,
+        page=page,
+        limit=limit,
+        pagination=pagination_meta(page, limit, total, len(reports)),
+    )
 
 
 @api_router.get("/assessments/reports/{report_id}")
@@ -6048,6 +6064,8 @@ async def fetch_report_history(
 @api_router.get("/assessments/students/{student_id}/reports")
 async def fetch_student_reports(
     student_id: str,
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
     role = normalize_role(current_user.get("role"))
@@ -6060,8 +6078,16 @@ async def fetch_student_reports(
     else:
         query = assessment_report_query_for_user(current_user)
         query["student_id"] = student_id
-    reports = await db.assessment_reports.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return api_success([public_report_payload(report) for report in reports], count=len(reports))
+    page = bounded_page(page)
+    limit = bounded_limit(limit, default=100, maximum=200)
+    total = await db.assessment_reports.count_documents(query)
+    reports_cursor = db.assessment_reports.find(query, {"_id": 0})
+    reports = await apply_query_controls(reports_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
+    return api_success(
+        [public_report_payload(report) for report in reports],
+        count=len(reports),
+        pagination=pagination_meta(page, limit, total, len(reports)),
+    )
 
 
 @api_router.post("/assessments/reports/bulk-generate")
@@ -6096,13 +6122,19 @@ async def bulk_publish_assessment_reports(
     query = {"school_id": school_id, "exam_id": exam_id, "status": {"$in": ["approved", "submitted"]}}
     if class_name:
         query["class_name"] = class_name
-    reports = await db.assessment_reports.find(query).to_list(10000)
-    for report in reports:
-        await db.assessment_reports.update_one(
-            {"id": report["id"], "school_id": school_id},
-            {"$set": {"status": "published", "published_by": current_user.get("user_id"), "published_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("bulk_published", current_user)}}
-        )
-    return api_success({"published": len(reports)}, message="Reports published")
+    result = await db.assessment_reports.update_many(
+        query,
+        {
+            "$set": {
+                "status": "published",
+                "published_by": current_user.get("user_id"),
+                "published_at": now_utc(),
+                "updated_at": now_utc(),
+            },
+            "$push": {"history": report_history_event("bulk_published", current_user)},
+        },
+    )
+    return api_success({"published": result.modified_count}, message="Reports published")
 
 
 @api_router.post("/assessments/reports/promote")
@@ -6130,6 +6162,48 @@ async def generate_report_pdf(
             "features": ["school_logo", "watermark", "qr_code", "student_photo", "page_numbering", "automatic_date", "digital_signature"],
         }
     }
+
+
+@api_router.post("/assessments/reports/{report_id}/pdf-jobs")
+async def queue_report_pdf_job(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    job_id = str(uuid.uuid4())
+    now = now_utc()
+    job = {
+        "id": job_id,
+        "job_type": "assessment_report_pdf",
+        "school_id": report.get("school_id"),
+        "report_id": report_id,
+        "student_id": report.get("student_id"),
+        "exam_id": report.get("exam_id"),
+        "status": "queued",
+        "priority": "normal",
+        "requested_by": current_user.get("user_id") or current_user.get("id"),
+        "attempts": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.report_jobs.insert_one(job)
+    await log_security_event("report_pdf_job_queued", current_user, {"job_id": job_id, "report_id": report_id})
+    return api_success(serialize_doc(job), message="PDF generation queued")
+
+
+@api_router.get("/report-jobs/{job_id}")
+async def get_report_job(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+    query = {"id": job_id}
+    if role != "super_admin":
+        query["school_id"] = current_user.get("school_id")
+    job = await db.report_jobs.find_one(query, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Report job not found")
+    return api_success(job)
 
 
 # OLD LOGIN - DISABLED
@@ -6400,6 +6474,9 @@ async def record_result(
 @api_router.get("/results/{student_id}")
 async def get_student_results(
     student_id: str,
+    page: int = 1,
+    limit: int = 100,
+    paginated: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -6424,14 +6501,17 @@ async def get_student_results(
         if role not in ["school_admin", "teacher", "super_admin"]:
             query["approval_status"] = "approved"
 
-        results = await db.results.find(
+        page = bounded_page(page)
+        limit = bounded_limit(limit, default=100, maximum=200)
+        total = await db.results.count_documents(query)
+        results_cursor = db.results.find(
             query,
             {"_id": 0}
-        ).sort(
-            "created_at",
-            -1
-        ).to_list(length=1000)
+        )
+        results = await apply_query_controls(results_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
 
+        if paginated:
+            return api_success(results, count=len(results), pagination=pagination_meta(page, limit, total, len(results)))
         return results
 
     except HTTPException:
@@ -6449,6 +6529,9 @@ async def get_student_results(
 @api_router.get("/announcements")
 async def get_announcements(
     approval_status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 100,
+    paginated: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -6478,13 +6561,14 @@ async def get_announcements(
         elif approval_status and approval_status != "all":
             query["approval_status"] = approval_status
 
-        announcements = await db.announcements.find(
+        page = bounded_page(page)
+        limit = bounded_limit(limit, default=100, maximum=200)
+        total = await db.announcements.count_documents(query)
+        announcements_cursor = db.announcements.find(
             query,
             {"_id": 0}
-        ).sort(
-            "created_at",
-            -1
-        ).to_list(length=1000)
+        )
+        announcements = await apply_query_controls(announcements_cursor, page=page, limit=limit, sort=[("created_at", -1)]).to_list(length=limit)
 
         if not can_view_all:
             user_id = current_user.get("user_id") or current_user.get("id")
@@ -6508,6 +6592,8 @@ async def get_announcements(
                         filtered.append(announcement)
             announcements = filtered
 
+        if paginated:
+            return api_success(announcements, count=len(announcements), pagination=pagination_meta(page, limit, total, len(announcements)))
         return announcements
 
     except HTTPException:
@@ -8595,6 +8681,8 @@ async def ensure_database_indexes():
         (db.dashboard_summaries, [("school_id", 1)], {"unique": True, "name": "dashboard_summaries_school_idx"}),
         (db.dashboard_summaries, [("updated_at", -1)], {"name": "dashboard_summaries_updated_idx"}),
         (db.archive_manifests, [("school_id", 1), ("collection", 1), ("archive_year", 1)], {"name": "archive_manifests_school_collection_year_idx"}),
+        (db.report_jobs, [("school_id", 1), ("status", 1), ("created_at", 1)], {"name": "report_jobs_school_status_created_idx"}),
+        (db.report_jobs, [("id", 1)], {"unique": True, "name": "report_jobs_id_idx"}),
     ]
 
     for collection, keys, options in index_specs:

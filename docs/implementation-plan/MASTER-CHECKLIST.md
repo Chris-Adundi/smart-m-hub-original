@@ -28,14 +28,14 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 3 - Performance Optimization
 
-- [ ] PERF-01 Add pagination to all high-volume list endpoints.
-- [ ] PERF-02 Add response projections and explicit DTOs for large payloads.
-- [ ] PERF-03 Replace N+1 loops with batch fetches and bulk writes.
-- [ ] PERF-04 Add dashboard summary read models.
-- [ ] PERF-05 Add server-side query timeouts and max result limits.
-- [ ] PERF-06 Move expensive report/PDF work out of request-response path.
-- [ ] PERF-07 Add frontend route-level code splitting.
-- [ ] PERF-08 Add table virtualization for large admin tables.
+- [x] PERF-01 Add pagination to all high-volume list endpoints.
+- [x] PERF-02 Add response projections and explicit DTOs for large payloads.
+- [x] PERF-03 Replace N+1 loops with batch fetches and bulk writes.
+- [x] PERF-04 Add dashboard summary read models.
+- [x] PERF-05 Add server-side query timeouts and max result limits.
+- [x] PERF-06 Move expensive report/PDF work out of request-response path.
+- [x] PERF-07 Add frontend route-level code splitting.
+- [x] PERF-08 Add table virtualization for large admin tables.
 
 ## Phase 4 - Scalability Improvements
 
