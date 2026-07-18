@@ -47,6 +47,7 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 JWT_ISSUER = "smart-m-hub"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOGIN_LOCKOUT_MINUTES = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
 PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "8"))
@@ -145,6 +146,20 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None):
+    payload = data.copy()
+    issued_at = now_utc()
+    expire = issued_at + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    payload.update({
+        "exp": expire,
+        "iat": issued_at,
+        "iss": JWT_ISSUER,
+        "typ": "refresh",
+        "jti": secrets.token_urlsafe(24),
+    })
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
 def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], issuer=JWT_ISSUER)
@@ -153,6 +168,46 @@ def decode_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def decode_refresh_token(token: str) -> Optional[dict]:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], issuer=JWT_ISSUER)
+        if payload.get("typ") != "refresh":
+            return None
+        return payload
+    except JWTError:
+        return None
+
+
+def redact_sensitive(value: Any) -> Any:
+    sensitive_keys = {
+        "password",
+        "password_hash",
+        "hashed_password",
+        "new_password",
+        "confirm_password",
+        "token",
+        "access_token",
+        "refresh_token",
+        "secret",
+        "mfa_secret",
+        "code",
+        "reset_code",
+        "temporary_password",
+    }
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized in sensitive_keys or normalized.endswith("_token") or normalized.endswith("_secret"):
+                cleaned[key] = "[REDACTED]"
+            else:
+                cleaned[key] = redact_sensitive(item)
+        return cleaned
+    if isinstance(value, list):
+        return [redact_sensitive(item) for item in value]
+    return value
 
 
 def login_attempt_key(email: str, school_code: Optional[str] = None) -> str:
@@ -199,7 +254,7 @@ async def log_security_event(action: str, user: Optional[dict] = None, metadata:
         "performed_by": (user or {}).get("email"),
         "user_id": (user or {}).get("user_id") or (user or {}).get("id"),
         "school_id": (user or {}).get("school_id"),
-        "metadata": metadata or {},
+        "metadata": redact_sensitive(metadata or {}),
         "timestamp": now_utc(),
     })
 
@@ -222,6 +277,7 @@ async def get_current_user(
     user_id = payload.get("user_id")
     token_role = normalize_role(payload.get("role"))
     school_id = payload.get("school_id")
+    session_id = payload.get("sid")
 
     if not user_id:
         raise HTTPException(
@@ -264,6 +320,20 @@ async def get_current_user(
             status_code=403,
             detail="Role mismatch"
         )
+
+    if session_id:
+        session = await db.auth_sessions.find_one({
+            "id": str(session_id),
+            "user_id": str(user.get("id") or user.get("_id")),
+            "revoked": {"$ne": True},
+        })
+        expires_at = session.get("expires_at") if session else None
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if not session or (expires_at and expires_at < now_utc()):
+            raise HTTPException(status_code=401, detail="Session has expired")
 
     platform_settings = await db.platform_settings.find_one({}, {"_id": 0}) or {}
     if platform_settings.get("maintenance_mode") is True and db_role != "super_admin":
@@ -308,6 +378,7 @@ async def get_current_user(
         "user_id": str(user.get("id") or user.get("_id")),
         "role": db_role,
         "school_id": school_id,
+        "session_id": str(session_id) if session_id else None,
         "email": user.get("email"),
         "full_name": user.get("full_name"),
         "student_id": user.get("student_id"),

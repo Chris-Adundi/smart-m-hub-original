@@ -54,7 +54,9 @@ from auth import (
     hash_password,
     verify_password,
     create_access_token,
+    create_refresh_token,
     decode_token,
+    decode_refresh_token,
     get_current_user,
     require_roles,
     login_user,
@@ -64,6 +66,17 @@ from auth import (
     record_login_failure,
     clear_login_failures,
     log_security_event,
+)
+from security_controls import (
+    STAFF_ROLES,
+    generate_mfa_secret,
+    redact_sensitive,
+    require_can_manage_staff,
+    require_same_school as policy_require_same_school,
+    safe_filename,
+    sha256_hex,
+    validate_magic_bytes,
+    verify_totp,
 )
 
 # =====================================================
@@ -133,6 +146,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if APP_ENV in {"production", "prod"}:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:; frame-ancestors 'none'",
+        )
+    return response
 
 # =====================================================
 # ROUTERS
@@ -654,6 +683,61 @@ def validate_upload_file(file: UploadFile) -> str:
     return extension
 
 
+RATE_LIMITS = {
+    "login": (10, 15 * 60),
+    "forgot_password": (5, 15 * 60),
+    "reset_password": (5, 15 * 60),
+    "join_school": (5, 15 * 60),
+    "school_resolve": (30, 5 * 60),
+    "upload": (60, 60 * 60),
+    "support_ticket": (10, 60 * 60),
+    "bulk_action": (20, 60 * 60),
+}
+
+
+def request_fingerprint(request: Request, *parts: Optional[str]) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else None
+    client_ip = client_ip or (request.client.host if request.client else "unknown")
+    return "|".join([client_ip, *[str(part or "").strip().lower() for part in parts if part]])
+
+
+async def enforce_rate_limit(scope: str, key: str):
+    limit, window_seconds = RATE_LIMITS.get(scope, (60, 60))
+    now = now_utc()
+    window_start = now - timedelta(seconds=window_seconds)
+    rate_key = f"{scope}:{sha256_hex(key.encode('utf-8'))}"
+    record = await db.rate_limits.find_one_and_update(
+        {"key": rate_key},
+        {
+            "$setOnInsert": {"created_at": now, "scope": scope},
+            "$set": {"last_seen": now, "expires_at": now + timedelta(seconds=window_seconds)},
+            "$push": {"hits": now},
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    normalized_hits = []
+    for hit in record.get("hits") or []:
+        if isinstance(hit, str):
+            try:
+                hit = datetime.fromisoformat(hit.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+        if isinstance(hit, datetime) and hit.tzinfo is None:
+            hit = hit.replace(tzinfo=timezone.utc)
+        if isinstance(hit, datetime) and hit >= window_start:
+            normalized_hits.append(hit)
+    hits = normalized_hits[-limit - 1:]
+    await db.rate_limits.update_one({"key": rate_key}, {"$set": {"hits": hits, "updated_at": now}})
+    if len(hits) > limit:
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+
+
+def redact_user_payload(user: dict) -> dict:
+    return serialize_doc(redact_sensitive(user or {}))
+
+
 # =====================================================
 # REQUEST MODELS
 # =====================================================
@@ -732,6 +816,7 @@ class LoginRequest(BaseModel):
     school_code: Optional[str] = None
     admission_number: Optional[str] = None
     student_access_code: Optional[str] = None
+    mfa_code: Optional[str] = None
 
 
 class CreateStudentRequest(BaseModel):
@@ -888,6 +973,14 @@ class RecordResultRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
     school_code: Optional[str] = None
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class MFASetupRequest(BaseModel):
+    code: Optional[str] = None
 
 
 class VerifyResetCodeRequest(BaseModel):
@@ -1141,6 +1234,7 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
 
 @api_router.post("/uploads")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     category: str = Form("document"),
     current_user: dict = Depends(get_current_user)
@@ -1153,9 +1247,12 @@ async def upload_file(
     if role != "super_admin" and not school_id:
         raise HTTPException(status_code=403, detail="School context required")
 
+    await enforce_rate_limit("upload", request_fingerprint(request, current_user.get("user_id"), str(school_id)))
+
     payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(payload) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File exceeds upload size limit")
+    validate_magic_bytes(payload, file.content_type)
 
     safe_school_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(school_id))
     target_dir = UPLOAD_ROOT / safe_school_id / upload_category
@@ -1166,24 +1263,46 @@ async def upload_file(
     target_path.write_bytes(payload)
 
     url = f"/uploads/{safe_school_id}/{upload_category}/{file_id}"
+    file_asset = {
+        "id": str(uuid.uuid4()),
+        "school_id": str(school_id),
+        "uploaded_by": current_user.get("user_id") or current_user.get("id"),
+        "category": upload_category,
+        "original_filename": safe_filename(file.filename),
+        "stored_filename": file_id,
+        "content_type": file.content_type,
+        "extension": extension,
+        "size": len(payload),
+        "sha256": sha256_hex(payload),
+        "storage_backend": "local",
+        "storage_path": str(target_path),
+        "url": url,
+        "is_private": True,
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    await db.file_assets.insert_one(file_asset)
     await log_security_event(
         "file_uploaded",
         current_user,
         {
             "category": upload_category,
-            "filename": file.filename,
+            "filename": safe_filename(file.filename),
             "content_type": file.content_type,
             "size": len(payload),
             "url": url,
+            "file_asset_id": file_asset["id"],
         }
     )
 
     return api_success(
         {
             "url": url,
+            "file_asset_id": file_asset["id"],
             "category": upload_category,
             "content_type": file.content_type,
             "size": len(payload),
+            "sha256": file_asset["sha256"],
         },
         message="File uploaded successfully"
     )
@@ -1635,7 +1754,7 @@ async def get_pending_users(
     # =========================
     return {
         "success": True,
-        "data": serialize_docs(users)
+        "data": [redact_user_payload(user) for user in users]
     }
 
 
@@ -1703,7 +1822,7 @@ async def get_staff(
         member_id = str(member.get("id") or member.get("_id"))
         profile = profile_by_user.get(member_id) or {}
         merged = {
-            **serialize_doc(member),
+            **redact_user_payload(member),
             "staff_profile": profile,
             "employee_number": profile.get("employee_number") or member.get("employee_number") or "-",
             "department": profile.get("department") or member.get("department") or role_label(member.get("role")),
@@ -1857,7 +1976,7 @@ async def create_staff(
 
     return api_success(
         {
-            "user": serialize_doc(user_doc),
+            "user": redact_user_payload(user_doc),
             "staff": serialize_doc(staff_doc)
         },
         message="Staff member created successfully"
@@ -2038,6 +2157,76 @@ async def reset_staff_password(
     )
     await log_security_event("staff_password_reset", current_user, {"staff_user_id": user_id})
     return api_success(message="Staff password reset")
+
+
+@api_router.get("/staff/password-reset-requests")
+async def list_staff_password_reset_requests(current_user: dict = Depends(get_current_user)):
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {"status": "pending"}
+    if role != "super_admin":
+        query["school_id"] = current_user.get("school_id")
+    requests = await db.staff_password_reset_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return api_success(requests, count=len(requests))
+
+
+@api_router.post("/staff/password-reset-requests/{request_id}/complete")
+async def complete_staff_password_reset_request(
+    request_id: str,
+    payload: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {"id": request_id, "status": "pending"}
+    if role != "super_admin":
+        query["school_id"] = current_user.get("school_id")
+    reset_request = await db.staff_password_reset_requests.find_one(query)
+    if not reset_request:
+        raise HTTPException(status_code=404, detail="Password reset request not found")
+
+    target = await db.users.find_one({
+        "id": reset_request.get("user_id"),
+        "school_id": reset_request.get("school_id"),
+        "role": {"$in": list(STAFF_ROLES)},
+    })
+    if not target or target.get("deleted") is True:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    if role != "super_admin":
+        require_can_manage_staff(current_user, target)
+
+    password = str(payload.get("password") or "")
+    confirm_password = payload.get("confirm_password")
+    if confirm_password is not None and password != str(confirm_password):
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    validate_password_strength(password)
+    now = now_utc()
+    await db.users.update_one(
+        {"id": target.get("id"), "school_id": target.get("school_id")},
+        {"$set": {
+            "password_hash": hash_password(password),
+            "password_reset_by": current_user.get("user_id") or current_user.get("id"),
+            "password_reset_at": now,
+            "updated_at": now,
+        }}
+    )
+    await db.staff_password_reset_requests.update_one(
+        {"id": request_id},
+        {"$set": {
+            "status": "completed",
+            "completed_by": current_user.get("user_id") or current_user.get("id"),
+            "completed_at": now,
+            "updated_at": now,
+        }}
+    )
+    await db.auth_sessions.update_many(
+        {"user_id": target.get("id"), "revoked": {"$ne": True}},
+        {"$set": {"revoked": True, "revoked_at": now, "updated_at": now}},
+    )
+    await log_security_event("staff_password_reset_request_completed", current_user, {"request_id": request_id, "staff_user_id": target.get("id")})
+    return api_success(message="Staff password reset request completed")
 
 
 @api_router.delete("/staff/{user_id}")
@@ -2422,13 +2611,14 @@ async def approve_item(
     # =========================
     # RESPONSE
     # =========================
+    response_item = redact_user_payload(updated_item) if item_type == "users" else serialize_doc(updated_item)
     return {
         "success": True,
         "message": f"{item_type} {action} successfully",
         "item_type": item_type,
         "item_id": item_id,
         "approval_status": action,
-        "updated_item": serialize_doc(updated_item),
+        "updated_item": response_item,
         "approved_by": user_id,
         "approval_role": role
     }
@@ -2647,8 +2837,9 @@ async def reactivate_school_user(
 # =========================
 
 @api_router.get("/public/schools/resolve/{school_code}")
-async def resolve_school_code(school_code: str):
+async def resolve_school_code(school_code: str, request: Request):
     normalized_code = str(school_code or "").strip().upper()
+    await enforce_rate_limit("school_resolve", request_fingerprint(request, normalized_code))
 
     if not re.fullmatch(r"(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})", normalized_code):
         raise HTTPException(status_code=400, detail="Invalid school code format")
@@ -2670,8 +2861,9 @@ async def resolve_school_code(school_code: str):
 
 
 @api_router.get("/public/schools/resolve/{school_code}/classes")
-async def resolve_school_classes(school_code: str):
+async def resolve_school_classes(school_code: str, request: Request):
     normalized_code = str(school_code or "").strip().upper()
+    await enforce_rate_limit("school_resolve", request_fingerprint(request, normalized_code, "classes"))
 
     if not re.fullmatch(r"(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})", normalized_code):
         raise HTTPException(status_code=400, detail="Invalid school code format")
@@ -2696,7 +2888,9 @@ async def resolve_school_classes(school_code: str):
 
 
 @api_router.get("/public/schools/invite/{invite_code}/classes")
-async def resolve_invite_school_classes(invite_code: str):
+async def resolve_invite_school_classes(invite_code: str, request: Request):
+    normalized_invite = str(invite_code or "").strip().upper()
+    await enforce_rate_limit("school_resolve", request_fingerprint(request, normalized_invite, "invite_classes"))
     school = await find_school_for_join(invite_code=invite_code)
 
     if not school or school.get("is_active") is False:
@@ -3071,27 +3265,28 @@ async def submit_registration_payment_phone(payload: RegistrationPaymentPhoneReq
 
 
 @api_router.post("/auth/join-school")
-async def join_school(request: dict):
+async def join_school(payload: dict, http_request: Request):
 
     try:
 
         # =========================
         # INPUT NORMALIZATION
         # =========================
-        invite_code = (request.get("invite_code") or "").strip().upper()
-        school_code = (request.get("school_code") or "").strip().upper()
-        email = (request.get("email") or "").strip().lower()
-        password = request.get("password") or ""
-        full_name = (request.get("full_name") or "").strip()
-        phone = (request.get("phone") or "").strip() or None
-        raw_role = (request.get("role") or "")
-        admission_number = (request.get("admission_number") or "").strip() or None
-        student_access_code = (request.get("student_access_code") or "").strip().upper() or None
-        selected_classes = request.get("selected_classes") or []
-        child_name = (request.get("child_name") or "").strip() or None
-        child_admission_number = (request.get("child_admission_number") or "").strip() or None
+        invite_code = (payload.get("invite_code") or "").strip().upper()
+        school_code = (payload.get("school_code") or "").strip().upper()
+        email = (payload.get("email") or "").strip().lower()
+        password = payload.get("password") or ""
+        full_name = (payload.get("full_name") or "").strip()
+        phone = (payload.get("phone") or "").strip() or None
+        raw_role = (payload.get("role") or "")
+        admission_number = (payload.get("admission_number") or "").strip() or None
+        student_access_code = (payload.get("student_access_code") or "").strip().upper() or None
+        selected_classes = payload.get("selected_classes") or []
+        child_name = (payload.get("child_name") or "").strip() or None
+        child_admission_number = (payload.get("child_admission_number") or "").strip() or None
 
         role = normalize_role(raw_role).lower()
+        await enforce_rate_limit("join_school", request_fingerprint(http_request, email, school_code, invite_code, role))
 
         # =========================
         # VALIDATION
@@ -3265,11 +3460,12 @@ async def join_school(request: dict):
 
 
 @api_router.post("/auth/login", operation_id="auth_login_user")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_request: Request):
     try:
         email = (request.email or "").strip().lower()
         password = (request.password or "").strip()
         school_code = (request.school_code or "").strip().upper()
+        await enforce_rate_limit("login", request_fingerprint(http_request, email, school_code))
 
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email and password required")
@@ -3348,6 +3544,12 @@ async def login(request: LoginRequest):
             await log_security_event("login_blocked", user, {"reason": "account_deactivated"})
             raise HTTPException(status_code=403, detail="Your account has been deactivated.")
 
+        if user.get("mfa_enabled") is True:
+            if not verify_totp(str(user.get("mfa_secret") or ""), str(request.mfa_code or "")):
+                await record_login_failure(email, school_code, "mfa_required")
+                await log_security_event("login_blocked", user, {"reason": "mfa_required"})
+                raise HTTPException(status_code=403, detail="Multi-factor authentication code is required")
+
         school_id = user.get("school_id")
 
         student_identifier = (request.student_access_code or "").strip().upper()
@@ -3412,17 +3614,42 @@ async def login(request: LoginRequest):
 
         await log_security_event("login_success", user, {"school_id": school_id, "role": db_role})
 
+        session_id = str(uuid.uuid4())
         token = create_access_token({
             "user_id": user_id,
             "email": email,
             "role": db_role,
-            "school_id": school_id
+            "school_id": school_id,
+            "sid": session_id,
+        })
+        refresh_token = create_refresh_token({
+            "user_id": user_id,
+            "email": email,
+            "role": db_role,
+            "school_id": school_id,
+            "sid": session_id,
+        })
+        refresh_payload = decode_refresh_token(refresh_token) or {}
+        refresh_expires_at = datetime.fromtimestamp(refresh_payload.get("exp"), timezone.utc) if refresh_payload.get("exp") else now_utc() + timedelta(days=14)
+        await db.auth_sessions.insert_one({
+            "id": session_id,
+            "user_id": user_id,
+            "school_id": school_id,
+            "role": db_role,
+            "refresh_jti": refresh_payload.get("jti"),
+            "revoked": False,
+            "expires_at": refresh_expires_at,
+            "created_at": now_utc(),
+            "updated_at": now_utc(),
         })
 
         return {
             "success": True,
             "access_token": token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
+            "expires_in_minutes": 60 * 24,
+            "session_id": session_id,
             "user": {
                 "id": user_id,
                 "email": email,
@@ -3446,10 +3673,146 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=500, detail="Login failed")
 
 
+@api_router.post("/auth/refresh")
+async def refresh_access_token(payload: RefreshTokenRequest):
+    token_payload = decode_refresh_token(payload.refresh_token)
+    if not token_payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    session_id = str(token_payload.get("sid") or "")
+    user_id = str(token_payload.get("user_id") or "")
+    refresh_jti = token_payload.get("jti")
+    if not session_id or not user_id or not refresh_jti:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    session = await db.auth_sessions.find_one({
+        "id": session_id,
+        "user_id": user_id,
+        "refresh_jti": refresh_jti,
+        "revoked": {"$ne": True},
+    })
+    expires_at = session.get("expires_at") if session else None
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not session or not expires_at or expires_at < now_utc():
+        raise HTTPException(status_code=401, detail="Session has expired")
+
+    user = await db.users.find_one({"id": user_id})
+    if not user or user.get("is_active") is False or user.get("is_suspended") is True:
+        raise HTTPException(status_code=401, detail="Account is not active")
+
+    role = normalize_role(user.get("role"))
+    school_id = user.get("school_id")
+    new_access_token = create_access_token({
+        "user_id": user_id,
+        "email": user.get("email"),
+        "role": role,
+        "school_id": school_id,
+        "sid": session_id,
+    })
+    new_refresh_token = create_refresh_token({
+        "user_id": user_id,
+        "email": user.get("email"),
+        "role": role,
+        "school_id": school_id,
+        "sid": session_id,
+    })
+    new_refresh_payload = decode_refresh_token(new_refresh_token) or {}
+    new_expires_at = datetime.fromtimestamp(new_refresh_payload.get("exp"), timezone.utc) if new_refresh_payload.get("exp") else now_utc() + timedelta(days=14)
+    await db.auth_sessions.update_one(
+        {"id": session_id, "user_id": user_id},
+        {"$set": {
+            "refresh_jti": new_refresh_payload.get("jti"),
+            "expires_at": new_expires_at,
+            "updated_at": now_utc(),
+        }}
+    )
+    await log_security_event("token_refreshed", user, {"session_id": session_id})
+    return {
+        "success": True,
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+        "expires_in_minutes": 60 * 24,
+    }
+
+
+@api_router.post("/auth/logout")
+async def logout_session(http_request: Request, current_user: dict = Depends(get_current_user)):
+    payload = {}
+    try:
+        payload = await http_request.json()
+    except Exception:
+        payload = {}
+
+    session_id = current_user.get("session_id")
+    refresh_token = payload.get("refresh_token") if isinstance(payload, dict) else None
+    if refresh_token:
+        refresh_payload = decode_refresh_token(str(refresh_token))
+        if refresh_payload and str(refresh_payload.get("user_id")) == str(current_user.get("user_id")):
+            session_id = refresh_payload.get("sid") or session_id
+
+    if session_id:
+        await db.auth_sessions.update_one(
+            {"id": str(session_id), "user_id": str(current_user.get("user_id"))},
+            {"$set": {"revoked": True, "revoked_at": now_utc(), "updated_at": now_utc()}},
+        )
+    await log_security_event("logout", current_user, {"session_id": session_id})
+    return api_success(message="Logged out")
+
+
+@api_router.post("/auth/mfa/setup")
+async def setup_mfa(current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    secret = generate_mfa_secret()
+    user_id = current_user.get("user_id")
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"mfa_pending_secret": secret, "updated_at": now_utc()}},
+    )
+    issuer = "Smart M Hub"
+    label = f"{issuer}:{current_user.get('email')}"
+    provisioning_uri = f"otpauth://totp/{label}?secret={secret}&issuer={issuer.replace(' ', '%20')}"
+    await log_security_event("mfa_setup_started", current_user)
+    return api_success({"secret": secret, "provisioning_uri": provisioning_uri}, message="MFA setup started")
+
+
+@api_router.post("/auth/mfa/enable")
+async def enable_mfa(payload: MFASetupRequest, current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    user = await db.users.find_one({"id": current_user.get("user_id")})
+    secret = str((user or {}).get("mfa_pending_secret") or "")
+    if not secret or not verify_totp(secret, str(payload.code or "")):
+        raise HTTPException(status_code=400, detail="Invalid MFA code")
+    await db.users.update_one(
+        {"id": current_user.get("user_id")},
+        {"$set": {"mfa_enabled": True, "mfa_secret": secret, "updated_at": now_utc()}, "$unset": {"mfa_pending_secret": ""}},
+    )
+    await log_security_event("mfa_enabled", current_user)
+    return api_success(message="MFA enabled")
+
+
+@api_router.post("/auth/mfa/disable")
+async def disable_mfa(current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    await db.users.update_one(
+        {"id": current_user.get("user_id")},
+        {"$set": {"mfa_enabled": False, "updated_at": now_utc()}, "$unset": {"mfa_secret": "", "mfa_pending_secret": ""}},
+    )
+    await log_security_event("mfa_disabled", current_user)
+    return api_success(message="MFA disabled")
+
+
 @api_router.post("/auth/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest):
+async def forgot_password(request: ForgotPasswordRequest, http_request: Request):
     email = str(request.email or "").strip().lower()
     school_code = str(request.school_code or "").strip().upper()
+    await enforce_rate_limit("forgot_password", request_fingerprint(http_request, email, school_code))
     query = {"email": email}
     if school_code:
         school = await db.schools.find_one({"school_code": school_code})
@@ -3461,6 +3824,24 @@ async def forgot_password(request: ForgotPasswordRequest):
     if not user:
         await log_security_event("password_reset_requested_unknown", metadata={"email": email, "school_code": school_code})
         return {"success": True, "message": "If the account exists, a verification code has been sent."}
+
+    if normalize_role(user.get("role")) in STAFF_ROLES:
+        request_id = str(uuid.uuid4())
+        await db.staff_password_reset_requests.insert_one({
+            "id": request_id,
+            "user_id": user.get("id"),
+            "school_id": user.get("school_id"),
+            "email": email,
+            "school_code": school_code,
+            "status": "pending",
+            "created_at": now_utc(),
+            "updated_at": now_utc(),
+        })
+        await log_security_event("staff_password_reset_requested", user, {"request_id": request_id})
+        return {
+            "success": True,
+            "message": "Your password reset request has been sent to the school administrator.",
+        }
 
     phone = str(user.get("phone") or user.get("phone_number") or "").strip()
     if not phone:
@@ -3494,9 +3875,10 @@ async def forgot_password(request: ForgotPasswordRequest):
 
 
 @api_router.post("/auth/reset-password")
-async def reset_password_with_code(request: VerifyResetCodeRequest):
+async def reset_password_with_code(request: VerifyResetCodeRequest, http_request: Request):
     email = str(request.email or "").strip().lower()
     school_code = str(request.school_code or "").strip().upper()
+    await enforce_rate_limit("reset_password", request_fingerprint(http_request, email, school_code))
     query = {"email": email}
     if school_code:
         school = await db.schools.find_one({"school_code": school_code})
@@ -5624,6 +6006,7 @@ async def fetch_student_reports(
 
 @api_router.post("/assessments/reports/bulk-generate")
 async def bulk_generate_assessment_reports(
+    request: Request,
     exam_id: str,
     current_user: dict = Depends(get_current_user)
 ):
@@ -5631,6 +6014,7 @@ async def bulk_generate_assessment_reports(
     role = normalize_role(current_user.get("role"))
     if role not in {"school_admin", "teacher"}:
         raise HTTPException(status_code=403, detail="Unauthorized")
+    await enforce_rate_limit("bulk_action", request_fingerprint(request, current_user.get("user_id"), school_id, exam_id, "generate"))
     exam = await db.exams.find_one({"id": exam_id, "school_id": school_id})
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
@@ -5640,6 +6024,7 @@ async def bulk_generate_assessment_reports(
 
 @api_router.post("/assessments/reports/bulk-publish")
 async def bulk_publish_assessment_reports(
+    request: Request,
     exam_id: str,
     class_name: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -5647,6 +6032,7 @@ async def bulk_publish_assessment_reports(
     school_id = current_user.get("school_id")
     if normalize_role(current_user.get("role")) != "school_admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    await enforce_rate_limit("bulk_action", request_fingerprint(request, current_user.get("user_id"), school_id, exam_id, class_name, "publish"))
     query = {"school_id": school_id, "exam_id": exam_id, "status": {"$in": ["approved", "submitted"]}}
     if class_name:
         query["class_name"] = class_name
@@ -6901,6 +7287,7 @@ async def get_school_support_tickets(current_user: dict = Depends(get_current_us
 
 @api_router.post("/support-tickets")
 async def create_school_support_ticket(
+    request: Request,
     data: dict,
     current_user: dict = Depends(get_current_user)
 ):
@@ -6911,6 +7298,7 @@ async def create_school_support_ticket(
     role = normalize_role(current_user.get("role"))
     if role not in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
         raise HTTPException(status_code=403, detail="Unauthorized")
+    await enforce_rate_limit("support_ticket", request_fingerprint(request, current_user.get("user_id"), school_id))
 
     subject = str(data.get("subject") or "").strip()
     message = str(data.get("message") or "").strip()
@@ -8101,6 +8489,14 @@ async def ensure_database_indexes():
         (db.support_tickets, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "support_school_status_created_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
         (db.login_attempts, [("key", 1)], {"unique": True, "name": "login_attempt_key_idx"}),
+        (db.rate_limits, [("key", 1)], {"unique": True, "name": "rate_limits_key_idx"}),
+        (db.rate_limits, [("expires_at", 1)], {"expireAfterSeconds": 0, "name": "rate_limits_ttl_idx"}),
+        (db.auth_sessions, [("id", 1)], {"unique": True, "name": "auth_sessions_id_idx"}),
+        (db.auth_sessions, [("user_id", 1), ("revoked", 1), ("expires_at", -1)], {"name": "auth_sessions_user_active_idx"}),
+        (db.file_assets, [("school_id", 1), ("category", 1), ("created_at", -1)], {"name": "file_assets_school_category_created_idx"}),
+        (db.file_assets, [("sha256", 1)], {"name": "file_assets_sha256_idx"}),
+        (db.staff_password_reset_requests, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "staff_reset_school_status_created_idx"}),
+        (db.staff_password_reset_requests, [("user_id", 1), ("status", 1)], {"name": "staff_reset_user_status_idx"}),
         (db.platform_invoices, [("school_id", 1), ("invoice_type", 1), ("billing_month", 1)], {"name": "invoices_school_type_month_idx"}),
         (db.platform_invoices, [("status", 1), ("due_date", 1)], {"name": "invoices_status_due_date_idx"}),
         (db.subscription_reminders, [("school_id", 1), ("billing_month", 1), ("reminder_type", 1)], {"name": "reminders_school_month_type_idx"}),
