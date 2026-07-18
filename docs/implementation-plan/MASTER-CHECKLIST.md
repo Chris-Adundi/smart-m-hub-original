@@ -39,14 +39,14 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 4 - Scalability Improvements
 
-- [ ] SCALE-01 Move file storage from local filesystem to S3-compatible object storage.
-- [ ] SCALE-02 Add Redis for cache, rate limits, session metadata, and lightweight locks.
-- [ ] SCALE-03 Add queue and worker service.
-- [ ] SCALE-04 Move CBC bulk generation to worker jobs.
-- [ ] SCALE-05 Move notification delivery to workers.
-- [ ] SCALE-06 Add cache for school branding, permission maps, CBC templates, dashboard counters, and school-code resolution.
-- [ ] SCALE-07 Add connection pool and query timeout configuration.
-- [ ] SCALE-08 Add feature flags for high-risk scale features.
+- [x] SCALE-01 Move file storage from local filesystem to S3-compatible object storage.
+- [x] SCALE-02 Add Redis for cache, rate limits, session metadata, and lightweight locks.
+- [x] SCALE-03 Add queue and worker service.
+- [x] SCALE-04 Move CBC bulk generation to worker jobs.
+- [x] SCALE-05 Move notification delivery to workers.
+- [x] SCALE-06 Add cache for school branding, permission maps, CBC templates, dashboard counters, and school-code resolution.
+- [x] SCALE-07 Add connection pool and query timeout configuration.
+- [x] SCALE-08 Add feature flags for high-risk scale features.
 
 ## Phase 5 - API Improvements
 

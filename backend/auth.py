@@ -30,7 +30,14 @@ if not MONGO_URL:
         raise RuntimeError("MONGO_URL must be set in production")
     MONGO_URL = "mongodb://localhost:27017"
 
-client = AsyncIOMotorClient(MONGO_URL)
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    maxPoolSize=int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
+    minPoolSize=int(os.getenv("MONGO_MIN_POOL_SIZE", "0")),
+    serverSelectionTimeoutMS=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")),
+    connectTimeoutMS=int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "10000")),
+    socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "20000")),
+)
 db = client[DB_NAME]
 
 # =========================

@@ -86,6 +86,10 @@ from db_controls import (
     pagination_meta,
 )
 from services.dashboard_summaries import get_school_dashboard_summary
+from services.cache import cache
+from services.job_queue import enqueue_job
+from services.storage import StorageError, store_upload
+from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
 
 # =====================================================
 # ROOT + ENV
@@ -107,7 +111,14 @@ db_name = os.getenv("DB_NAME", "smart_m_hub")
 if not isinstance(db_name, str) or not db_name.strip():
     raise ValueError("DB_NAME must be a valid string. Check your .env file.")
 
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
+    minPoolSize=int(os.getenv("MONGO_MIN_POOL_SIZE", "0")),
+    serverSelectionTimeoutMS=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")),
+    connectTimeoutMS=int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "10000")),
+    socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "20000")),
+)
 db = client[db_name]
 
 # =====================================================
@@ -715,6 +726,17 @@ async def enforce_rate_limit(scope: str, key: str):
     now = now_utc()
     window_start = now - timedelta(seconds=window_seconds)
     rate_key = f"{scope}:{sha256_hex(key.encode('utf-8'))}"
+    try:
+        cached_hits = await cache.incr_with_ttl(f"rate_limit:{rate_key}", window_seconds)
+        if cached_hits is not None:
+            if cached_hits > limit:
+                raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+            return
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Cache rate limit failed; falling back to database limiter", exc_info=True)
+
     record = await db.rate_limits.find_one_and_update(
         {"key": rate_key},
         {
@@ -1263,14 +1285,21 @@ async def upload_file(
     validate_magic_bytes(payload, file.content_type)
 
     safe_school_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(school_id))
-    target_dir = UPLOAD_ROOT / safe_school_id / upload_category
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     file_id = f"{uuid.uuid4().hex}{extension}"
-    target_path = target_dir / file_id
-    target_path.write_bytes(payload)
+    try:
+        stored = store_upload(
+            payload=payload,
+            content_type=file.content_type,
+            upload_root=UPLOAD_ROOT,
+            school_key=safe_school_id,
+            category=upload_category,
+            filename=file_id,
+        )
+    except StorageError as exc:
+        logger.error("Upload storage error: %s", exc)
+        raise HTTPException(status_code=500, detail="File storage is not available")
 
-    url = f"/uploads/{safe_school_id}/{upload_category}/{file_id}"
+    url = stored["url"]
     file_asset = {
         "id": str(uuid.uuid4()),
         "school_id": str(school_id),
@@ -1282,10 +1311,11 @@ async def upload_file(
         "extension": extension,
         "size": len(payload),
         "sha256": sha256_hex(payload),
-        "storage_backend": "local",
-        "storage_path": str(target_path),
+        "storage_backend": stored["storage_backend"],
+        "storage_key": stored["storage_key"],
+        "storage_path": stored["storage_path"],
         "url": url,
-        "is_private": True,
+        "is_private": stored["is_private"],
         "created_at": now_utc(),
         "updated_at": now_utc(),
     }
@@ -1419,6 +1449,8 @@ async def update_school_profile(
         current_user,
         {"fields": sorted(update_data.keys())}
     )
+    if current_school.get("school_code"):
+        await cache.delete(f"school_branding:{str(current_school.get('school_code')).strip().upper()}")
 
     updated_school = await db.schools.find_one({"id": school_id})
 
@@ -2883,6 +2915,11 @@ async def resolve_school_code(school_code: str, request: Request):
     if not re.fullmatch(r"(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})", normalized_code):
         raise HTTPException(status_code=400, detail="Invalid school code format")
 
+    cache_key = f"school_branding:{normalized_code}"
+    cached = await cache.get_json(cache_key)
+    if cached:
+        return {"success": True, "data": cached, "cached": True}
+
     school = await db.schools.find_one({
         "school_code": normalized_code,
         "is_active": {"$ne": False}
@@ -2892,10 +2929,12 @@ async def resolve_school_code(school_code: str, request: Request):
         raise HTTPException(status_code=404, detail="School code not found")
 
     school = await ensure_school_identity(school)
+    payload = school_branding_payload(school)
+    await cache.set_json(cache_key, payload, ttl_seconds=300)
 
     return {
         "success": True,
-        "data": school_branding_payload(school)
+        "data": payload
     }
 
 
@@ -6020,7 +6059,7 @@ async def publish_assessment_report(
         {"$set": {"status": "published", "published_by": current_user.get("user_id"), "published_at": now_utc(), "updated_at": now_utc()}, "$push": {"history": report_history_event("published", current_user)}}
     )
     recipients = ["student", "parent", "teacher"]
-    await db.notifications.insert_many([
+    notification_docs = [
         {
             "id": str(uuid.uuid4()),
             "school_id": report["school_id"],
@@ -6033,7 +6072,20 @@ async def publish_assessment_report(
             "created_at": now_utc(),
         }
         for recipient in recipients
-    ])
+    ]
+    await db.notifications.insert_many(notification_docs)
+    if ASYNC_NOTIFICATIONS:
+        await enqueue_job(
+            db,
+            job_type="notification_delivery",
+            school_id=report["school_id"],
+            payload={
+                "channel": "in_app",
+                "notification_ids": [item["id"] for item in notification_docs],
+                "report_id": report_id,
+            },
+            requested_by=current_user.get("user_id") or current_user.get("id"),
+        )
     return api_success(message="Report published")
 
 
@@ -6094,6 +6146,7 @@ async def fetch_student_reports(
 async def bulk_generate_assessment_reports(
     request: Request,
     exam_id: str,
+    async_mode: Optional[bool] = None,
     current_user: dict = Depends(get_current_user)
 ):
     school_id = current_user.get("school_id")
@@ -6104,8 +6157,33 @@ async def bulk_generate_assessment_reports(
     exam = await db.exams.find_one({"id": exam_id, "school_id": school_id})
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
+    use_async = ASYNC_BULK_REPORTS if async_mode is None else bool(async_mode)
+    if use_async:
+        job = await enqueue_job(
+            db,
+            job_type="bulk_generate_assessment_reports",
+            school_id=school_id,
+            payload={
+                "school_id": school_id,
+                "exam_id": exam_id,
+                "role": role,
+                "email": current_user.get("email"),
+            },
+            requested_by=current_user.get("user_id") or current_user.get("id"),
+        )
+        await log_security_event("bulk_report_generation_queued", current_user, {"job_id": job["id"], "exam_id": exam_id})
+        return api_success({"job_id": job["id"], "status": job["status"]}, message="Report generation queued")
     summary = await bulk_generate_reports_for_exam(school_id, exam, current_user)
     return api_success(summary, message="Reports generated")
+
+
+@api_router.post("/assessments/reports/bulk-generate-jobs")
+async def queue_bulk_generate_assessment_reports(
+    request: Request,
+    exam_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    return await bulk_generate_assessment_reports(request, exam_id, True, current_user)
 
 
 @api_router.post("/assessments/reports/bulk-publish")
@@ -6187,6 +6265,13 @@ async def queue_report_pdf_job(
         "updated_at": now,
     }
     await db.report_jobs.insert_one(job)
+    await enqueue_job(
+        db,
+        job_type="assessment_report_pdf",
+        school_id=report.get("school_id"),
+        payload={"report_id": report_id, "report_job_id": job_id},
+        requested_by=current_user.get("user_id") or current_user.get("id"),
+    )
     await log_security_event("report_pdf_job_queued", current_user, {"job_id": job_id, "report_id": report_id})
     return api_success(serialize_doc(job), message="PDF generation queued")
 
@@ -8683,6 +8768,10 @@ async def ensure_database_indexes():
         (db.archive_manifests, [("school_id", 1), ("collection", 1), ("archive_year", 1)], {"name": "archive_manifests_school_collection_year_idx"}),
         (db.report_jobs, [("school_id", 1), ("status", 1), ("created_at", 1)], {"name": "report_jobs_school_status_created_idx"}),
         (db.report_jobs, [("id", 1)], {"unique": True, "name": "report_jobs_id_idx"}),
+        (db.jobs, [("status", 1), ("job_type", 1), ("available_at", 1), ("created_at", 1)], {"name": "jobs_status_type_available_idx"}),
+        (db.jobs, [("id", 1)], {"unique": True, "name": "jobs_id_idx"}),
+        (db.jobs, [("school_id", 1), ("job_type", 1), ("status", 1), ("created_at", -1)], {"name": "jobs_school_type_status_created_idx"}),
+        (db.notification_deliveries, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "notification_deliveries_school_status_created_idx"}),
     ]
 
     for collection, keys, options in index_specs:
