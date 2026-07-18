@@ -28,3 +28,10 @@ def test_health_response_includes_request_and_trace_ids():
     assert response.headers["x-request-id"] == "req_test"
     assert response.headers.get("x-trace-id")
     assert response.json()["data"]["status"] == "ok"
+
+
+def test_metrics_requires_authentication():
+    client = TestClient(app)
+    response = client.get("/api/metrics")
+
+    assert response.status_code in {401, 403}

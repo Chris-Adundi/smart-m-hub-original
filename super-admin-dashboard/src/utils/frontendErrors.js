@@ -1,7 +1,7 @@
 function resolveApiRoot() {
   const configured = import.meta.env.VITE_API_BASE_URL;
   const base = configured || "http://localhost:8000/api";
-  return base.replace(/\/$/, "");
+  return base.replace(/\/platform\/?$/, "").replace(/\/$/, "");
 }
 
 export function reportFrontendError(error, info, portal = "super-admin") {

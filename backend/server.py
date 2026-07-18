@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form, Body
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
@@ -829,11 +829,13 @@ RATE_LIMITS = {
     "login": (10, 15 * 60),
     "forgot_password": (5, 15 * 60),
     "reset_password": (5, 15 * 60),
+    "register_school": (5, 60 * 60),
     "join_school": (5, 15 * 60),
     "school_resolve": (30, 5 * 60),
     "upload": (60, 60 * 60),
     "support_ticket": (10, 60 * 60),
     "frontend_error": (20, 10 * 60),
+    "mpesa_callback": (120, 5 * 60),
     "bulk_action": (20, 60 * 60),
 }
 
@@ -921,14 +923,16 @@ async def readiness_check():
         checks["mongodb"] = "ok"
         await queued_job_depth()
         checks["job_queue"] = "ok"
-    except Exception as exc:
+    except Exception:
         logger.exception("readiness_check_failed")
-        raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks, "error": str(exc)})
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
     return api_success({"status": "ready", "checks": checks})
 
 
 @api_router.get("/metrics")
-async def metrics_snapshot():
+async def metrics_snapshot(current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) != "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin access required")
     queue_depth = None
     try:
         queue_depth = await queued_job_depth()
@@ -938,7 +942,9 @@ async def metrics_snapshot():
 
 
 @api_router.get("/metrics/prometheus", response_class=PlainTextResponse)
-async def metrics_prometheus():
+async def metrics_prometheus(current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) != "super_admin":
+        raise HTTPException(status_code=403, detail="Super Admin access required")
     queue_depth = None
     try:
         queue_depth = await queued_job_depth()
@@ -2398,7 +2404,7 @@ async def update_staff(
 @api_router.patch("/staff/{user_id}/status")
 async def update_staff_status(
     user_id: str,
-    payload: Any,
+    payload: StaffStatusPayload = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
     target = await require_school_admin_staff_target(user_id, current_user)
@@ -3236,6 +3242,7 @@ async def resolve_invite_school_classes(invite_code: str, request: Request):
 async def register_school(payload: RegisterSchoolRequest, request: Request):
 
     try:
+        await enforce_rate_limit("register_school", request_fingerprint(request, payload.email, payload.admin_email))
 
         # =========================
         # NORMALIZED INPUTS
@@ -3537,6 +3544,7 @@ async def submit_registration_payment_phone(payload: RegistrationPaymentPhoneReq
     school_id = str(payload.school_id or "").strip()
     school_code = str(payload.school_code or "").strip().upper()
     payment_phone = str(payload.payment_phone or "").strip()
+    await enforce_rate_limit("register_school", request_fingerprint(request, school_id, school_code, payment_phone))
 
     if not school_id or not school_code:
         raise HTTPException(status_code=400, detail="School registration reference is required")
@@ -7473,6 +7481,7 @@ from fastapi import Request
 
 @api_router.post("/webhooks/mpesa/callback")
 async def mpesa_callback(request: Request):
+    await enforce_rate_limit("mpesa_callback", request_fingerprint(request, "mpesa"))
     callback = await request.json()
 
     if not isinstance(callback, dict):

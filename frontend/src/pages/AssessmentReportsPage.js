@@ -174,6 +174,23 @@ const AssessmentReportsPage = () => {
 
   const downloadPdf = async (report) => {
     try {
+      const response = await apiClient.get(`/assessments/reports/${report.id}/pdf-official`, {
+        responseType: "blob",
+      });
+      const blobUrl = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `${report?.learner_details?.admission_number || report.id}-cbc-report.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      toast.success("Official PDF downloaded");
+      return;
+    } catch (error) {
+      toast.error("Official PDF download failed. Queueing server generation.");
+    }
+    try {
       await apiClient.post(`/assessments/reports/${report.id}/pdf-jobs`);
       toast.success("Official PDF generation queued");
       return;

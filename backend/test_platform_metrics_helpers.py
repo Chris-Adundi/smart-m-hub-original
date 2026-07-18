@@ -35,20 +35,29 @@ def test_is_today_handles_string_and_datetime_values():
     assert not platform.is_today("2026-07-07T10:00:00+00:00", today)
 
 
-def test_upload_storage_usage_can_be_scoped_to_school(tmp_path, monkeypatch):
-    upload_root = tmp_path / "uploads"
+def test_upload_storage_usage_can_be_scoped_to_school(monkeypatch):
+    upload_root = Path(__file__).with_name("_platform_uploads_test")
     school_dir = upload_root / "school-1" / "document"
-    school_dir.mkdir(parents=True)
-    (school_dir / "file.txt").write_bytes(b"12345")
-    (upload_root / "platform").mkdir()
+    try:
+        school_dir.mkdir(parents=True, exist_ok=True)
+        (school_dir / "file.txt").write_bytes(b"12345")
+        (upload_root / "platform").mkdir(exist_ok=True)
 
-    monkeypatch.setattr(platform, "UPLOAD_ROOT", Path(upload_root))
+        monkeypatch.setattr(platform, "UPLOAD_ROOT", Path(upload_root))
 
-    scoped = platform.upload_storage_usage("school-1")
-    total = platform.upload_storage_usage()
+        scoped = platform.upload_storage_usage("school-1")
+        total = platform.upload_storage_usage()
 
-    assert scoped["files"] == 1
-    assert total["files"] == 1
+        assert scoped["files"] == 1
+        assert total["files"] == 1
+    finally:
+        if upload_root.exists():
+            for path in sorted(upload_root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            upload_root.rmdir()
 
 
 def test_diagnostic_from_error_includes_review_notes():

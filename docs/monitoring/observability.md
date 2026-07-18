@@ -8,8 +8,8 @@ Smart M Hub now exposes core runtime signals from the FastAPI backend without ch
 |---|---|---|
 | Liveness | `/api/health` | Confirms the API process is running. |
 | Readiness | `/api/ready` | Confirms MongoDB and the job queue collection are reachable. |
-| JSON metrics | `/api/metrics` | Human-readable counters, route counts, latency windows, and queue depth. |
-| Prometheus metrics | `/api/metrics/prometheus` | Scrape-friendly metrics for dashboards and alerts. |
+| JSON metrics | `/api/metrics` | Super-Admin-protected counters, route counts, latency windows, and queue depth. |
+| Prometheus metrics | `/api/metrics/prometheus` | Super-Admin-protected scrape-friendly metrics for dashboards and alerts. |
 | Request logs | stdout/stderr | Structured JSON request logs with request and trace IDs. |
 | Frontend errors | `/api/frontend-errors` | Browser route errors from main and super-admin portals. |
 
@@ -56,6 +56,8 @@ flowchart LR
 ## Metrics Notes
 
 The current registry is intentionally lightweight and in-process. In multi-instance production, Prometheus should scrape every instance and aggregate metrics centrally.
+
+Metrics endpoints require authenticated Super Admin access. Production monitoring should use a dedicated internal credential or an internal network path that preserves this control.
 
 Recommended next production integration:
 
