@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiClient, authService } from "@/App";
+import CbcReportSummaryCards from "@/features/cbc/CbcReportSummaryCards";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { CheckCircle2, Download, Eye, FileText, Send, Upload } from "lucide-react";
@@ -171,7 +172,14 @@ const AssessmentReportsPage = () => {
     }
   };
 
-  const downloadPdf = (report) => {
+  const downloadPdf = async (report) => {
+    try {
+      await apiClient.post(`/assessments/reports/${report.id}/pdf-jobs`);
+      toast.success("Official PDF generation queued");
+      return;
+    } catch (error) {
+      toast.error("Official PDF queue failed. Creating a browser copy instead.");
+    }
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const learner = report?.learner_details || {};
     const school = report?.school_details || {};
@@ -223,16 +231,7 @@ const AssessmentReportsPage = () => {
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {["draft", "submitted", "approved", "published", "archived"].map((item) => (
-          <Card key={item}>
-            <CardContent className="p-4">
-              <p className="text-xs text-slate-400 capitalize">{item}</p>
-              <p className="text-2xl font-semibold text-white">{summary[item] || 0}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <CbcReportSummaryCards summary={summary} />
 
       {isAdmin && (
         <Card>

@@ -11,6 +11,8 @@ import {
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { lazy, Suspense, useEffect, useState, useMemo } from "react";
+import { canAccessRoute, getDefaultRouteByRole, normalizeRole } from "@/utils/roleRoutes";
+import RouteErrorBoundary from "@/components/RouteErrorBoundary";
 // ======================
 // PAGES
 // ======================
@@ -99,63 +101,6 @@ export const formatApiError = (error, fallback = "Something went wrong") => {
   return String(detail || fallback);
 };
 
-// ======================
-// ROLE NORMALIZER
-// ======================
-export const normalizeRole = (role) => {
-  if (!role) return "";
-
-  const r = String(role)
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-
-  const map = {
-    admin: "school_admin",
-    schooladmin: "school_admin",
-    school_admin: "school_admin",
-
-    superadmin: "super_admin",
-    super_admin: "super_admin",
-
-    teacher: "teacher",
-    finance: "finance",
-    secretary: "secretary",
-    supporting_staff: "supporting_staff",
-    student: "student",
-    parent: "student",
-  };
-
-  return map[r] || r;
-};
-// ======================
-// DEFAULT REDIRECT
-// ======================
-export const getDefaultRouteByRole = (role) => {
-  switch (normalizeRole(role)) {
-    case "super_admin":
-      return "/app/dashboard";
-
-    case "teacher":
-      return "/app/teacher-portal";
-
-    case "finance":
-      return "/app/finance-portal";
-
-    case "secretary":
-      return "/app/secretary-portal";
-
-    case "supporting_staff":
-      return "/app/dashboard";
-
-    case "student":
-      return "/app/student-portal";
-
-    case "school_admin":
-    default:
-      return "/app/dashboard";
-  }
-};
 // ======================
 // AUTH SERVICE (CLEAN SINGLE SOURCE)
 // ======================
@@ -271,120 +216,6 @@ apiClient.interceptors.response.use(
   }
 );
 // ======================
-// ROUTE PERMISSIONS
-// ======================
-const routePermissions = {
-  // =========================
-  // CORE
-  // =========================
-school_profile: ["super_admin", "school_admin"],
-  dashboard: [
-    "super_admin",
-    "school_admin",
-    "teacher",
-    "finance",
-    "secretary",
-    "supporting_staff",
-  ],
-
-  students: [
-    "super_admin",
-    "school_admin",
-    "secretary",
-    "teacher",
-    "finance",
-  ],
-
-  staff: [
-    "super_admin",
-    "school_admin",
-  ],
-
-  fees: [
-    "super_admin",
-    "school_admin",
-    "finance",
-  ],
-
-  attendance: [
-    "super_admin",
-    "school_admin",
-    "teacher",
-    "secretary",
-  ],
-
-  exams: [
-    "super_admin",
-    "school_admin",
-    "teacher",
-  ],
-
-  assessments: [
-    "super_admin",
-    "school_admin",
-    "teacher",
-  ],
-
-  timetable: [
-    "super_admin",
-    "school_admin",
-    "teacher",
-    "student",
-  ],
-
-  inventory: [
-    "super_admin",
-    "school_admin",
-    "secretary",
-  ],
-
-  announcements: [
-    "super_admin",
-    "school_admin",
-    "secretary",
-    "teacher",
-    "finance",
-    "student",
-  ],
-
-  support: [
-    "school_admin",
-    "teacher",
-    "finance",
-    "secretary",
-    "student",
-  ],
-
-  // =========================
-  // PORTALS
-  // =========================
-
-  "teacher-portal": [
-    "super_admin",
-    "school_admin",
-    "teacher",
-  ],
-
-  "finance-portal": [
-    "super_admin",
-    "school_admin",
-    "finance",
-  ],
-
-  "secretary-portal": [
-    "super_admin",
-    "school_admin",
-    "secretary",
-  ],
-
-  "student-portal": [
-    "super_admin",
-    "student",
-  ],
-
-};
-
-// ======================
 // PROTECTED ROUTE
 // ======================
 const ProtectedRoute = () => {
@@ -418,13 +249,6 @@ const RoleProtectedRoute = ({ routeKey, children }) => {
   const role = normalizeRole(user?.role);
 
   // ======================
-  // SAFE ROUTE LOOKUP
-  // ======================
-
-  const allowedRoles =
-    routePermissions?.[routeKey] || [];
-
-  // ======================
   // INVALID ROLE SAFETY
   // ======================
 
@@ -443,9 +267,9 @@ const RoleProtectedRoute = ({ routeKey, children }) => {
   // ACCESS DENIED
   // ======================
 
-  if (!role || !allowedRoles.includes(role)) {
-  return <Navigate to="/login" replace />;
-}
+  if (!canAccessRoute(role, routeKey)) {
+    return <Navigate to={getDefaultRouteByRole(role)} replace />;
+  }
 
   // ======================
   // SUCCESS
@@ -498,6 +322,7 @@ function App() {
   return (
     <div className="App">
       <BrowserRouter>
+        <RouteErrorBoundary>
         <Suspense fallback={<RouteFallback />}>
         <Routes>
 
@@ -724,6 +549,7 @@ function App() {
 
         </Routes>
         </Suspense>
+        </RouteErrorBoundary>
       </BrowserRouter>
 
       <Toaster

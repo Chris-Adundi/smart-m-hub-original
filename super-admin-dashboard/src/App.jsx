@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { getAuthToken, isSuperAdmin } from "./auth/superAdminAuth";
 
 import MainLayout from "./layouts/MainLayout";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 
 const DashboardHome = lazy(() => import("./pages/DashboardHome"));
 const Schools = lazy(() => import("./pages/Schools"));
@@ -27,6 +28,7 @@ function RequireSuperAdmin({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <RouteErrorBoundary>
       <Suspense fallback={<div style={{ padding: 24, color: "#4b5563" }}>Loading...</div>}>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -50,6 +52,7 @@ export default function App() {
         </Route>
       </Routes>
       </Suspense>
+      </RouteErrorBoundary>
     </BrowserRouter>
   );
 }

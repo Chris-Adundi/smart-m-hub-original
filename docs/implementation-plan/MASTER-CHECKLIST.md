@@ -60,15 +60,15 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 6 - Frontend Improvements
 
-- [ ] FE-01 Centralize role normalization and route permissions.
-- [ ] FE-02 Add server-state cache such as TanStack Query.
-- [ ] FE-03 Add shared paginated table component.
-- [ ] FE-04 Add route-level error boundaries.
-- [ ] FE-05 Add route-level code splitting.
-- [ ] FE-06 Split large pages into feature components.
-- [ ] FE-07 Standardize loading, empty, error, confirm, and form validation patterns.
-- [ ] FE-08 Improve accessibility for dialogs, buttons, table rows, focus management, and contrast.
-- [ ] FE-09 Move official report/PDF actions to backend job flow once available.
+- [x] FE-01 Centralize role normalization and route permissions.
+- [x] FE-02 Add server-state cache such as TanStack Query.
+- [x] FE-03 Add shared paginated table component.
+- [x] FE-04 Add route-level error boundaries.
+- [x] FE-05 Add route-level code splitting.
+- [x] FE-06 Split large pages into feature components.
+- [x] FE-07 Standardize loading, empty, error, confirm, and form validation patterns.
+- [x] FE-08 Improve accessibility for dialogs, buttons, table rows, focus management, and contrast.
+- [x] FE-09 Move official report/PDF actions to backend job flow once available.
 
 ## Phase 7 - Monitoring And Logging
 
