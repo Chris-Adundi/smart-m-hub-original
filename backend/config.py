@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Iterable, Optional
+
+
+class ConfigurationError(RuntimeError):
+    pass
+
+
+def load_secret_file_env(names: Iterable[str]) -> None:
+    for name in names:
+        if os.getenv(name):
+            continue
+        file_name = f"{name}_FILE"
+        secret_path = os.getenv(file_name)
+        if not secret_path:
+            continue
+        path = Path(secret_path)
+        if not path.exists():
+            raise ConfigurationError(f"{file_name} points to a missing file: {secret_path}")
+        os.environ[name] = path.read_text(encoding="utf-8").strip()
+
+
+def current_env() -> str:
+    return os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
+
+
+def require_env(name: str, errors: list[str]) -> Optional[str]:
+    value = os.getenv(name)
+    if not value or not value.strip():
+        errors.append(f"{name} is required")
+        return None
+    return value.strip()
+
+
+def validate_environment() -> None:
+    env = current_env()
+    errors: list[str] = []
+
+    if env in {"production", "prod"}:
+        require_env("MONGO_URL", errors)
+        require_env("DB_NAME", errors)
+        secret_key = require_env("SECRET_KEY", errors)
+        require_env("FRONTEND_URL", errors)
+        if not (os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS") or os.getenv("ALLOWED_ORIGIN_REGEX") or os.getenv("CORS_ORIGIN_REGEX")):
+            errors.append("ALLOWED_ORIGINS/CORS_ORIGINS or ALLOWED_ORIGIN_REGEX/CORS_ORIGIN_REGEX is required")
+        if secret_key and len(secret_key) < 32:
+            errors.append("SECRET_KEY must be at least 32 characters in production")
+
+    storage_backend = os.getenv("STORAGE_BACKEND", "local").lower()
+    if storage_backend == "s3":
+        for name in ["S3_BUCKET", "AWS_REGION"]:
+            require_env(name, errors)
+
+    if errors:
+        raise ConfigurationError("Invalid Smart M Hub configuration: " + "; ".join(errors))

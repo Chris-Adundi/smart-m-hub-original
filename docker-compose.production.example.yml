@@ -1,0 +1,64 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: smart-m-hub-api:${SMART_M_HUB_VERSION:-latest}
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    ports:
+      - "8000:8000"
+    volumes:
+      - smart_m_hub_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    image: smart-m-hub-worker:${SMART_M_HUB_VERSION:-latest}
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    volumes:
+      - smart_m_hub_uploads:/app/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ${PUBLIC_API_URL}
+    image: smart-m-hub-frontend:${SMART_M_HUB_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  super-admin:
+    build:
+      context: .
+      dockerfile: super-admin-dashboard/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_PLATFORM_API_URL}
+    image: smart-m-hub-super-admin:${SMART_M_HUB_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  smart_m_hub_uploads:

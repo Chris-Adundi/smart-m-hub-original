@@ -82,14 +82,14 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 8 - Deployment And DevOps
 
-- [ ] DEVOPS-01 Containerize API and worker services.
-- [ ] DEVOPS-02 Host frontends as static CDN artifacts.
-- [ ] DEVOPS-03 Add CI/CD pipeline with backend compile, tests, frontend builds, lint, dependency scan, Docker build, and migration dry-run.
-- [ ] DEVOPS-04 Add staging environment mirroring production dependencies.
-- [ ] DEVOPS-05 Add secrets manager integration.
-- [ ] DEVOPS-06 Add rollback strategy with health-gated deployments.
-- [ ] DEVOPS-07 Add automated backup, PITR, object-storage versioning, and restore drills.
-- [ ] DEVOPS-08 Add environment-specific configuration validation.
+- [x] DEVOPS-01 Containerize API and worker services.
+- [x] DEVOPS-02 Host frontends as static CDN artifacts.
+- [x] DEVOPS-03 Add CI/CD pipeline with backend compile, tests, frontend builds, lint, dependency scan, Docker build, and migration dry-run.
+- [x] DEVOPS-04 Add staging environment mirroring production dependencies.
+- [x] DEVOPS-05 Add secrets manager integration.
+- [x] DEVOPS-06 Add rollback strategy with health-gated deployments.
+- [x] DEVOPS-07 Add automated backup, PITR, object-storage versioning, and restore drills.
+- [x] DEVOPS-08 Add environment-specific configuration validation.
 
 ## Phase 9 - Code Cleanup And Refactoring
 

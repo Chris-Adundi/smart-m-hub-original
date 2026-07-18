@@ -18,9 +18,12 @@ import secrets
 # =========================
 from dotenv import load_dotenv
 from pathlib import Path
+from config import load_secret_file_env, validate_environment
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
+load_secret_file_env(["SECRET_KEY", "MONGO_URL"])
+validate_environment()
 
 DB_NAME = os.getenv("DB_NAME", "smart_m_hub")
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()

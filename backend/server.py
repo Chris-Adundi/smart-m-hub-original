@@ -95,6 +95,7 @@ from services.cache import cache
 from services.job_queue import enqueue_job
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
+from config import load_secret_file_env, validate_environment
 from observability import (
     START_TIME,
     configure_logging,
@@ -107,6 +108,8 @@ from observability import (
 # =====================================================
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
+load_secret_file_env(["SECRET_KEY", "MONGO_URL", "OPENAI_API_KEY", "STRIPE_API_KEY"])
+validate_environment()
 configure_logging()
 
 # =====================================================
