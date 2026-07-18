@@ -72,13 +72,13 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 7 - Monitoring And Logging
 
-- [ ] OBS-01 Add request IDs and structured JSON request logs.
-- [ ] OBS-02 Add structured audit taxonomy for privileged actions.
-- [ ] OBS-03 Add metrics for request count, latency, errors, logins, uploads, queue depth, workers, PDFs, and notifications.
-- [ ] OBS-04 Add health and readiness endpoints.
-- [ ] OBS-05 Add OpenTelemetry tracing.
-- [ ] OBS-06 Add alert rules for error spikes, login failures, DB pressure, queue backlog, upload failures, and payment callback failures.
-- [ ] OBS-07 Add frontend error capture.
+- [x] OBS-01 Add request IDs and structured JSON request logs.
+- [x] OBS-02 Add structured audit taxonomy for privileged actions.
+- [x] OBS-03 Add metrics for request count, latency, errors, logins, uploads, queue depth, workers, PDFs, and notifications.
+- [x] OBS-04 Add health and readiness endpoints.
+- [x] OBS-05 Add OpenTelemetry tracing.
+- [x] OBS-06 Add alert rules for error spikes, login failures, DB pressure, queue backlog, upload failures, and payment callback failures.
+- [x] OBS-07 Add frontend error capture.
 
 ## Phase 8 - Deployment And DevOps
 

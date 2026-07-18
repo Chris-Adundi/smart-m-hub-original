@@ -1,4 +1,5 @@
 import { Component } from "react";
+import { reportFrontendError } from "../utils/frontendErrors";
 
 export default class RouteErrorBoundary extends Component {
   constructor(props) {
@@ -12,6 +13,7 @@ export default class RouteErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     console.error("Route error", error, info);
+    reportFrontendError(error, info, "super-admin");
   }
 
   render() {

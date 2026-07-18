@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { ErrorState } from "@/components/ui/state";
+import { reportFrontendError } from "@/services/frontendErrors";
 
 export default class RouteErrorBoundary extends Component {
   constructor(props) {
@@ -13,6 +14,7 @@ export default class RouteErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     console.error("Route error", error, info);
+    reportFrontendError(error, info, "main");
   }
 
   render() {

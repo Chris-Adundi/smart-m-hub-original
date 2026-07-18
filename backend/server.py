@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,7 @@ import re
 import secrets
 import string
 import copy
+import time
 
 from pathlib import Path
 from pydantic import BaseModel, EmailStr
@@ -94,12 +95,19 @@ from services.cache import cache
 from services.job_queue import enqueue_job
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
+from observability import (
+    START_TIME,
+    configure_logging,
+    metrics,
+    resolve_trace_id,
+)
 
 # =====================================================
 # ROOT + ENV
 # =====================================================
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
+configure_logging()
 
 # =====================================================
 # DATABASE CONNECTION
@@ -173,15 +181,38 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    started_at = time.perf_counter()
     request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+    trace_id = resolve_trace_id(dict(request.headers))
     request.state.request_id = request_id
+    request.state.trace_id = trace_id
     original_path = request.scope.get("path", "")
     if original_path == "/api/v1":
         request.scope["path"] = "/api"
     elif original_path.startswith("/api/v1/"):
         request.scope["path"] = "/api/" + original_path[len("/api/v1/"):]
-    response = await call_next(request)
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        metrics.record_request(request.method, original_path or request.url.path, status_code, duration_ms)
+        logging.getLogger("smart_m_hub.requests").exception(
+            "request_failed",
+            extra={"event": {
+                "event_type": "http_request",
+                "request_id": request_id,
+                "trace_id": trace_id,
+                "method": request.method,
+                "route": original_path or request.url.path,
+                "status_code": status_code,
+                "duration_ms": round(duration_ms, 2),
+            }},
+        )
+        raise
     response.headers.setdefault("X-Request-ID", request_id)
+    response.headers.setdefault("X-Trace-ID", trace_id)
     if original_path.startswith("/api/") and not original_path.startswith("/api/v1/"):
         response.headers.setdefault("Deprecation", "true")
         response.headers.setdefault("Link", '</api/v1>; rel="successor-version"')
@@ -195,6 +226,21 @@ async def add_security_headers(request: Request, call_next):
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:; frame-ancestors 'none'",
         )
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    metrics.record_request(request.method, original_path or request.url.path, status_code, duration_ms)
+    logging.getLogger("smart_m_hub.requests").info(
+        "request_completed",
+        extra={"event": {
+            "event_type": "http_request",
+            "request_id": request_id,
+            "trace_id": trace_id,
+            "method": request.method,
+            "route": original_path or request.url.path,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 2),
+            "client_ip": request.client.host if request.client else None,
+        }},
+    )
     return response
 
 
@@ -227,6 +273,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         "detail": exc.detail,
         "message": message,
         "request_id": getattr(request.state, "request_id", None),
+        "trace_id": getattr(request.state, "trace_id", None),
     }
     return JSONResponse(status_code=exc.status_code, content=body, headers=getattr(exc, "headers", None))
 
@@ -243,6 +290,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         "detail": exc.errors(),
         "message": "Request validation failed",
         "request_id": getattr(request.state, "request_id", None),
+        "trace_id": getattr(request.state, "trace_id", None),
     }
     return JSONResponse(status_code=422, content=body)
 
@@ -774,6 +822,7 @@ RATE_LIMITS = {
     "school_resolve": (30, 5 * 60),
     "upload": (60, 60 * 60),
     "support_ticket": (10, 60 * 60),
+    "frontend_error": (20, 10 * 60),
     "bulk_action": (20, 60 * 60),
 }
 
@@ -826,6 +875,99 @@ async def enforce_rate_limit(scope: str, key: str):
     await db.rate_limits.update_one({"key": rate_key}, {"$set": {"hits": hits, "updated_at": now}})
     if len(hits) > limit:
         raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+
+
+class FrontendErrorRequest(BaseModel):
+    message: str
+    stack: Optional[str] = None
+    component_stack: Optional[str] = None
+    route: Optional[str] = None
+    portal: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+async def queued_job_depth() -> int:
+    return await db.jobs.count_documents({"status": "queued"})
+
+
+@api_router.get("/health")
+async def health_check():
+    return api_success({
+        "status": "ok",
+        "service": "smart-m-hub-api",
+        "uptime_seconds": int(time.time() - START_TIME),
+    })
+
+
+@api_router.get("/ready")
+async def readiness_check():
+    checks = {
+        "mongodb": "unknown",
+        "job_queue": "unknown",
+    }
+    try:
+        await db.command("ping")
+        checks["mongodb"] = "ok"
+        await queued_job_depth()
+        checks["job_queue"] = "ok"
+    except Exception as exc:
+        logger.exception("readiness_check_failed")
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks, "error": str(exc)})
+    return api_success({"status": "ready", "checks": checks})
+
+
+@api_router.get("/metrics")
+async def metrics_snapshot():
+    queue_depth = None
+    try:
+        queue_depth = await queued_job_depth()
+    except Exception:
+        logger.warning("metrics_queue_depth_unavailable", exc_info=True)
+    return api_success(metrics.snapshot(queue_depth=queue_depth))
+
+
+@api_router.get("/metrics/prometheus", response_class=PlainTextResponse)
+async def metrics_prometheus():
+    queue_depth = None
+    try:
+        queue_depth = await queued_job_depth()
+    except Exception:
+        logger.warning("metrics_queue_depth_unavailable", exc_info=True)
+    return metrics.prometheus_text(queue_depth=queue_depth)
+
+
+@api_router.post("/frontend-errors")
+async def capture_frontend_error(payload: FrontendErrorRequest, request: Request):
+    await enforce_rate_limit("frontend_error", request_fingerprint(request, payload.portal, payload.route))
+    message = str(payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Error message required")
+    event = {
+        "id": str(uuid.uuid4()),
+        "event_type": "frontend_error",
+        "message": message[:500],
+        "stack": str(payload.stack or "")[:4000],
+        "component_stack": str(payload.component_stack or "")[:4000],
+        "route": str(payload.route or "")[:300],
+        "portal": str(payload.portal or "main")[:80],
+        "user_agent": str(payload.user_agent or request.headers.get("user-agent") or "")[:500],
+        "request_id": getattr(request.state, "request_id", None),
+        "trace_id": getattr(request.state, "trace_id", None),
+        "created_at": now_utc(),
+    }
+    await db.frontend_error_events.insert_one(event)
+    metrics.increment("frontend_errors_total", portal=event["portal"])
+    logger.warning(
+        "frontend_error_captured",
+        extra={"event": {
+            "event_type": "frontend_error",
+            "request_id": event["request_id"],
+            "trace_id": event["trace_id"],
+            "route": event["route"],
+            "portal": event["portal"],
+        }},
+    )
+    return api_success({"id": event["id"]}, message="Frontend error captured")
 
 
 def redact_user_payload(user: dict) -> dict:
@@ -8867,6 +9009,10 @@ async def ensure_database_indexes():
         (db.jobs, [("id", 1)], {"unique": True, "name": "jobs_id_idx"}),
         (db.jobs, [("school_id", 1), ("job_type", 1), ("status", 1), ("created_at", -1)], {"name": "jobs_school_type_status_created_idx"}),
         (db.notification_deliveries, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "notification_deliveries_school_status_created_idx"}),
+        (db.audit_logs, [("school_id", 1), ("category", 1), ("severity", 1), ("timestamp", -1)], {"name": "audit_logs_taxonomy_idx"}),
+        (db.audit_logs, [("action", 1), ("timestamp", -1)], {"name": "audit_logs_action_timestamp_idx"}),
+        (db.frontend_error_events, [("portal", 1), ("route", 1), ("created_at", -1)], {"name": "frontend_error_events_portal_route_created_idx"}),
+        (db.frontend_error_events, [("created_at", -1)], {"name": "frontend_error_events_created_idx"}),
     ]
 
     for collection, keys, options in index_specs:

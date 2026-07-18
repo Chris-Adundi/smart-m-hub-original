@@ -261,12 +261,40 @@ async def clear_login_failures(email: str, school_code: Optional[str] = None):
     await db.login_attempts.delete_one({"key": login_attempt_key(email, school_code)})
 
 
+def audit_event_category(action: str) -> str:
+    normalized = str(action or "").lower()
+    if "login" in normalized or "password" in normalized or "mfa" in normalized or "token" in normalized:
+        return "authentication"
+    if "staff" in normalized or "role" in normalized or "permission" in normalized:
+        return "authorization"
+    if "finance" in normalized or "payment" in normalized or "mpesa" in normalized:
+        return "finance"
+    if "assessment" in normalized or "report" in normalized or "exam" in normalized:
+        return "academic"
+    if "school" in normalized:
+        return "tenant_admin"
+    return "system"
+
+
+def audit_event_severity(action: str) -> str:
+    normalized = str(action or "").lower()
+    if any(token in normalized for token in ["failed", "rejected", "deleted", "suspended", "locked"]):
+        return "warning"
+    if any(token in normalized for token in ["approved", "completed", "reset", "mfa", "created"]):
+        return "info"
+    return "notice"
+
+
 async def log_security_event(action: str, user: Optional[dict] = None, metadata: Optional[dict] = None):
     await db.audit_logs.insert_one({
+        "event_version": 1,
         "action": action,
+        "category": audit_event_category(action),
+        "severity": audit_event_severity(action),
         "performed_by": (user or {}).get("email"),
         "user_id": (user or {}).get("user_id") or (user or {}).get("id"),
         "school_id": (user or {}).get("school_id"),
+        "role": normalize_role((user or {}).get("role")),
         "metadata": redact_sensitive(metadata or {}),
         "timestamp": now_utc(),
     })
