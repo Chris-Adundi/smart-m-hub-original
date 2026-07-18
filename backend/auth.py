@@ -230,7 +230,13 @@ async def record_login_failure(email: str, school_code: Optional[str] = None, re
         {"key": key},
         {
             "$inc": {"attempts": 1},
-            "$set": {"email": str(email or "").strip().lower(), "school_code": str(school_code or "").strip().upper(), "last_failure": now, "reason": reason},
+            "$set": {
+                "email": str(email or "").strip().lower(),
+                "school_code": str(school_code or "").strip().upper(),
+                "last_failure": now,
+                "reason": reason,
+                "expires_at": now + timedelta(days=1),
+            },
             "$setOnInsert": {"created_at": now},
         },
         upsert=True,

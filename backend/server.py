@@ -78,6 +78,14 @@ from security_controls import (
     validate_magic_bytes,
     verify_totp,
 )
+from db_controls import (
+    bounded_limit,
+    bounded_page,
+    exclude_private_projection,
+    pagination_meta,
+    skip_for_page,
+)
+from services.dashboard_summaries import get_school_dashboard_summary
 
 # =====================================================
 # ROOT + ENV
@@ -1584,6 +1592,30 @@ async def get_dashboard_stats(
             "school_id": str(school_id)
         }
 
+        summary = await get_school_dashboard_summary(db, str(school_id))
+        return {
+            "success": True,
+            "total_students": summary.get("total_students", 0),
+            "total_staff": summary.get("total_staff", 0),
+            "total_teachers": summary.get("total_teachers", 0),
+            "pending_users": summary.get("pending_users", 0),
+            "approved_users": summary.get("approved_users", 0),
+            "rejected_users": summary.get("rejected_users", 0),
+            "suspended_users": summary.get("suspended_users", 0),
+            "present_today": summary.get("present_today", 0),
+            "pending_results": summary.get("pending_results", 0),
+            "pending_attendance": summary.get("pending_attendance", 0),
+            "pending_payments": summary.get("pending_payments", 0),
+            "pending_announcements": summary.get("pending_announcements", 0),
+            "pending_inventory": summary.get("pending_inventory", 0),
+            "pending_operations": summary.get("pending_operations", 0),
+            "summary": {
+                "source": "dashboard_summaries",
+                "from_cache": bool(summary.get("from_summary_cache")),
+                "updated_at": summary.get("updated_at"),
+            }
+        }
+
     # =========================
     # USERS
     # =========================
@@ -1763,6 +1795,8 @@ async def get_pending_users(
 # =========================
 @api_router.get("/staff")
 async def get_staff(
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -1804,11 +1838,15 @@ async def get_staff(
     # =========================
     # FETCH STAFF
     # =========================
+    page = bounded_page(page)
+    limit = bounded_limit(limit, default=100, maximum=200)
+    total = await db.users.count_documents(query)
     staff = await db.users.find(
-        query
+        query,
+        exclude_private_projection()
     ).sort(
         "created_at", -1
-    ).to_list(length=200)
+    ).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
 
     staff_user_ids = [str(member.get("id") or member.get("_id")) for member in staff]
     staff_profiles = await db.staff.find(
@@ -1844,6 +1882,8 @@ async def get_staff(
     # =========================
     return {
         "success": True,
+        "count": len(enriched_staff),
+        "pagination": pagination_meta(page, limit, total, len(enriched_staff)),
         "data": enriched_staff
     }
 
@@ -4449,6 +4489,8 @@ async def create_student(
 async def get_students(
     status: Optional[str] = None,
     approval_status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -4485,16 +4527,21 @@ async def get_students(
     if status and status != "all":
         query["status"] = status
 
+    page = bounded_page(page)
+    limit = bounded_limit(limit, default=100, maximum=200)
+    total = await db.students.count_documents(query)
     students = await db.students.find(
         query,
         {"_id": 0}
-    ).to_list(length=1000)
+    ).sort("created_at", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
 
     for student in students:
         student["education_level"] = student.get("education_level") or classify_school_level(student.get("class_name"))
 
     return {
         "success": True,
+        "count": len(students),
+        "pagination": pagination_meta(page, limit, total, len(students)),
         "data": serialize_docs(students)
     }
 
@@ -5057,6 +5104,8 @@ async def initiate_payment(
 @api_router.get("/payments")
 async def get_payments(
     approval_status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
     try:
@@ -5076,13 +5125,18 @@ async def get_payments(
         elif approval_status and approval_status != "all":
             query["approval_status"] = approval_status.lower()
 
+        page = bounded_page(page)
+        limit = bounded_limit(limit, default=100, maximum=200)
+        total = await db.payments.count_documents(query)
         payments = await db.payments.find(
             query,
             {"_id": 0}
-        ).sort("created_at", -1).to_list(1000)
+        ).sort("created_at", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(limit)
 
         return {
             "success": True,
+            "count": len(payments),
+            "pagination": pagination_meta(page, limit, total, len(payments)),
             "data": serialize_docs(payments)
         }
 
@@ -5405,6 +5459,8 @@ async def get_attendance_summary(
 async def get_attendance(
     date: Optional[str] = None,
     approval_status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 100,
     current_user: dict = Depends(get_current_user)
 ):
 
@@ -5486,14 +5542,18 @@ async def get_attendance(
         # =========================
         # FETCH
         # =========================
+        page = bounded_page(page)
+        limit = bounded_limit(limit, default=100, maximum=200)
+        total = await db.attendance.count_documents(query)
         attendance_records = await db.attendance.find(
             query,
             {"_id": 0}
-        ).to_list(length=1000)
+        ).sort("date", -1).skip(skip_for_page(page, limit)).limit(limit).to_list(length=limit)
 
         return {
             "success": True,
             "count": len(attendance_records),
+            "pagination": pagination_meta(page, limit, total, len(attendance_records)),
             "data": attendance_records
         }
 
@@ -8478,17 +8538,31 @@ async def ensure_database_indexes():
         (db.schools, [("id", 1)], {"name": "school_id_idx"}),
         (db.users, [("school_id", 1), ("email", 1)], {"name": "users_school_email_idx"}),
         (db.users, [("id", 1)], {"name": "users_id_idx"}),
+        (db.users, [("school_id", 1), ("role", 1), ("status", 1)], {"name": "users_school_role_status_idx"}),
+        (db.users, [("school_id", 1), ("approval_status", 1), ("role", 1)], {"name": "users_school_approval_role_idx"}),
         (db.students, [("school_id", 1), ("admission_number", 1)], {"name": "students_school_admission_idx"}),
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
+        (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),
+        (db.students, [("school_id", 1), ("guardian_email", 1)], {"name": "students_school_guardian_email_idx", "sparse": True}),
         (db.staff, [("school_id", 1), ("employee_number", 1)], {"name": "staff_school_employee_idx"}),
         (db.payments, [("school_id", 1), ("created_at", -1)], {"name": "payments_school_created_idx"}),
+        (db.payments, [("school_id", 1), ("student_id", 1), ("created_at", -1)], {"name": "payments_school_student_created_idx"}),
+        (db.payments, [("school_id", 1), ("approval_status", 1), ("status", 1), ("created_at", -1)], {"name": "payments_school_approval_status_created_idx"}),
+        (db.finance_transactions, [("school_id", 1), ("approval_status", 1), ("date", -1)], {"name": "finance_transactions_school_approval_date_idx"}),
         (db.attendance, [("school_id", 1), ("date", -1)], {"name": "attendance_school_date_idx"}),
+        (db.attendance, [("school_id", 1), ("date", -1), ("class_name", 1)], {"name": "attendance_school_date_class_idx"}),
+        (db.attendance, [("school_id", 1), ("student_id", 1), ("date", -1)], {"name": "attendance_school_student_date_idx"}),
+        (db.attendance, [("school_id", 1), ("approval_status", 1), ("archived", 1), ("date", -1)], {"name": "attendance_school_approval_archive_date_idx"}),
         (db.attendance_summaries, [("school_id", 1), ("week", -1), ("status", 1)], {"name": "attendance_summary_school_week_status_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
+        (db.results, [("school_id", 1), ("exam_id", 1), ("student_id", 1)], {"name": "results_school_exam_student_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
         (db.support_tickets, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "support_school_status_created_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
         (db.login_attempts, [("key", 1)], {"unique": True, "name": "login_attempt_key_idx"}),
+        (db.login_attempts, [("expires_at", 1)], {"expireAfterSeconds": 0, "name": "login_attempts_ttl_idx"}),
+        (db.password_reset_codes, [("expires_at", 1)], {"expireAfterSeconds": 0, "name": "password_reset_codes_ttl_idx"}),
+        (db.password_reset_codes, [("user_id", 1), ("used", 1), ("expires_at", -1)], {"name": "password_reset_codes_user_used_expires_idx"}),
         (db.rate_limits, [("key", 1)], {"unique": True, "name": "rate_limits_key_idx"}),
         (db.rate_limits, [("expires_at", 1)], {"expireAfterSeconds": 0, "name": "rate_limits_ttl_idx"}),
         (db.auth_sessions, [("id", 1)], {"unique": True, "name": "auth_sessions_id_idx"}),
@@ -8507,6 +8581,8 @@ async def ensure_database_indexes():
         (db.assessment_reports, [("school_id", 1), ("student_id", 1), ("exam_id", 1), ("class_name", 1)], {"unique": True, "name": "assessment_reports_unique_student_exam_class_idx"}),
         (db.assessment_reports, [("school_id", 1), ("status", 1), ("updated_at", -1)], {"name": "assessment_reports_status_idx"}),
         (db.assessment_reports, [("school_id", 1), ("class_name", 1), ("exam_id", 1)], {"name": "assessment_reports_class_exam_idx"}),
+        (db.assessment_reports, [("school_id", 1), ("student_id", 1), ("status", 1), ("created_at", -1)], {"name": "assessment_reports_student_status_created_idx"}),
+        (db.assessment_reports, [("school_id", 1), ("exam_id", 1), ("class_name", 1), ("status", 1)], {"name": "assessment_reports_exam_class_status_idx"}),
         (db.assessment_results, [("school_id", 1), ("report_id", 1)], {"name": "assessment_results_report_idx"}),
         (db.competencies, [("school_id", 1), ("report_id", 1)], {"name": "competencies_report_idx"}),
         (db.values, [("school_id", 1), ("report_id", 1)], {"name": "values_report_idx"}),
@@ -8515,6 +8591,10 @@ async def ensure_database_indexes():
         (db.report_history, [("school_id", 1), ("student_id", 1), ("created_at", -1)], {"name": "report_history_student_idx"}),
         (db.exam_sessions, [("school_id", 1), ("academic_year", 1), ("term", 1), ("class_name", 1)], {"name": "exam_sessions_school_term_class_idx"}),
         (db.notifications, [("school_id", 1), ("student_id", 1), ("read", 1), ("created_at", -1)], {"name": "notifications_student_read_idx"}),
+        (db.notifications, [("school_id", 1), ("recipient_id", 1), ("read", 1), ("created_at", -1)], {"name": "notifications_recipient_read_created_idx"}),
+        (db.dashboard_summaries, [("school_id", 1)], {"unique": True, "name": "dashboard_summaries_school_idx"}),
+        (db.dashboard_summaries, [("updated_at", -1)], {"name": "dashboard_summaries_updated_idx"}),
+        (db.archive_manifests, [("school_id", 1), ("collection", 1), ("archive_year", 1)], {"name": "archive_manifests_school_collection_year_idx"}),
     ]
 
     for collection, keys, options in index_specs:

@@ -17,14 +17,14 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 2 - Database Optimization
 
-- [ ] DB-01 Add compound indexes aligned to hot queries.
-- [ ] DB-02 Add production index migration scripts instead of relying only on startup index creation.
-- [ ] DB-03 Add pagination-ready query utilities with projections.
-- [ ] DB-04 Add archival policy for attendance, notifications, audit logs, support logs, and generated report artifacts.
-- [ ] DB-05 Create dashboard and module summary collections.
-- [ ] DB-06 Add backup and restore runbook with point-in-time recovery targets.
-- [ ] DB-07 Add TTL indexes only for temporary data.
-- [ ] DB-08 Add data dictionary for high-value collections.
+- [x] DB-01 Add compound indexes aligned to hot queries.
+- [x] DB-02 Add production index migration scripts instead of relying only on startup index creation.
+- [x] DB-03 Add pagination-ready query utilities with projections.
+- [x] DB-04 Add archival policy for attendance, notifications, audit logs, support logs, and generated report artifacts.
+- [x] DB-05 Create dashboard and module summary collections.
+- [x] DB-06 Add backup and restore runbook with point-in-time recovery targets.
+- [x] DB-07 Add TTL indexes only for temporary data.
+- [x] DB-08 Add data dictionary for high-value collections.
 
 ## Phase 3 - Performance Optimization
 
