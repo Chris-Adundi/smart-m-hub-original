@@ -1,0 +1,3 @@
+from app.core.roles import STAFF_AUTH_ROLES, STAFF_DESIGNATIONS
+
+__all__ = ["STAFF_AUTH_ROLES", "STAFF_DESIGNATIONS"]

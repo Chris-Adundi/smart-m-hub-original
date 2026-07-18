@@ -96,6 +96,21 @@ from services.job_queue import enqueue_job
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
 from config import load_secret_file_env, validate_environment
+from app.core.responses import api_success as shared_api_success
+from app.core.responses import error_code_for_status as shared_error_code_for_status
+from app.core.router_extraction import move_routes
+from app.core.roles import STAFF_AUTH_ROLES
+from app.core.serialization import (
+    ensure_id as shared_ensure_id,
+    generate_uuid as shared_generate_uuid,
+    serialize_doc as shared_serialize_doc,
+    serialize_docs as shared_serialize_docs,
+)
+from app.core.settings import get_settings
+from app.cbc.router import router as cbc_router
+from app.finance.router import router as finance_router
+from app.staff.router import router as staff_router
+from app.students.router import router as students_router
 from observability import (
     START_TIME,
     configure_logging,
@@ -135,6 +150,7 @@ client = AsyncIOMotorClient(
     socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "20000")),
 )
 db = client[db_name]
+settings = get_settings()
 
 # =====================================================
 # FASTAPI APP SETUP
@@ -248,19 +264,7 @@ async def add_security_headers(request: Request, call_next):
 
 
 def error_code_for_status(status_code: int) -> str:
-    return {
-        400: "bad_request",
-        401: "unauthorized",
-        403: "permission_denied",
-        404: "not_found",
-        409: "conflict",
-        413: "payload_too_large",
-        422: "validation_error",
-        423: "locked",
-        429: "rate_limited",
-        500: "internal_error",
-        503: "service_unavailable",
-    }.get(status_code, "api_error")
+    return shared_error_code_for_status(status_code)
 
 
 @app.exception_handler(HTTPException)
@@ -343,7 +347,7 @@ VALID_SYSTEM_ROLES = [
 # GENERAL HELPERS
 # =====================================================
 def generate_uuid() -> str:
-    return str(uuid.uuid4())
+    return shared_generate_uuid()
 
 
 def now_utc():
@@ -2172,7 +2176,7 @@ async def create_staff(
 
     staff_role = normalize_role(payload.role)
 
-    if staff_role not in ["teacher", "finance", "secretary", "supporting_staff"]:
+    if staff_role not in STAFF_AUTH_ROLES:
         raise HTTPException(
             status_code=400,
             detail="Staff role must be teacher, finance, secretary, or supporting_staff"
@@ -2331,7 +2335,7 @@ async def update_staff(
 
     if "role" in update and update["role"]:
         staff_role = normalize_role(update["role"])
-        if staff_role not in ["teacher", "finance", "secretary", "supporting_staff"]:
+        if staff_role not in STAFF_AUTH_ROLES:
             raise HTTPException(status_code=400, detail="Invalid staff role")
         user_updates["role"] = staff_role
         staff_updates["role"] = staff_role
@@ -3614,7 +3618,7 @@ async def join_school(payload: dict, http_request: Request):
         # =========================
         # ROLE VALIDATION
         # =========================
-        blocked_staff_roles = ["teacher", "finance", "secretary", "supporting_staff"]
+        blocked_staff_roles = STAFF_AUTH_ROLES
         if role in blocked_staff_roles:
             raise HTTPException(
                 status_code=403,
@@ -9030,6 +9034,16 @@ async def startup_tasks():
     await ensure_database_indexes()
 
 
+DOMAIN_ROUTE_COUNTS = {
+    "staff": move_routes(api_router, staff_router, ("/staff",)),
+    "students": move_routes(api_router, students_router, ("/students", "/student")),
+    "finance": move_routes(api_router, finance_router, ("/fees", "/payments", "/transactions", "/finance", "/mpesa", "/webhooks/mpesa", "/approval-requests")),
+    "cbc": move_routes(api_router, cbc_router, ("/assessments", "/cbc", "/exam-sessions")),
+}
+app.include_router(staff_router)
+app.include_router(students_router)
+app.include_router(finance_router)
+app.include_router(cbc_router)
 app.include_router(api_router)
 
 

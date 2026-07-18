@@ -93,14 +93,14 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 9 - Code Cleanup And Refactoring
 
-- [ ] REFACTOR-01 Split `backend/server.py` into domain routers and services.
-- [ ] REFACTOR-02 Introduce repositories for MongoDB access.
-- [ ] REFACTOR-03 Add typed settings object.
-- [ ] REFACTOR-04 Create shared serialization, pagination, error, and response utilities.
-- [ ] REFACTOR-05 Create module template/guidelines for future domains.
-- [ ] REFACTOR-06 Remove obsolete scripts and dead code after migration.
-- [ ] REFACTOR-07 Add documentation cleanup and developer onboarding docs.
-- [ ] REFACTOR-08 Separate system roles from staff designations in docs and validation.
+- [x] REFACTOR-01 Split `backend/server.py` into domain routers and services.
+- [x] REFACTOR-02 Introduce repositories for MongoDB access.
+- [x] REFACTOR-03 Add typed settings object.
+- [x] REFACTOR-04 Create shared serialization, pagination, error, and response utilities.
+- [x] REFACTOR-05 Create module template/guidelines for future domains.
+- [x] REFACTOR-06 Remove obsolete scripts and dead code after migration.
+- [x] REFACTOR-07 Add documentation cleanup and developer onboarding docs.
+- [x] REFACTOR-08 Separate system roles from staff designations in docs and validation.
 
 ## Phase 10 - Future Features
 
