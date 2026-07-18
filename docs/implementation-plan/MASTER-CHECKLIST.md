@@ -104,13 +104,13 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 10 - Future Features
 
-- [ ] FUT-01 Add notification abstraction for in-app, SMS, email, and push.
-- [ ] FUT-02 Add webhook framework for third-party integrations.
-- [ ] FUT-03 Add server-side official PDF/report rendering.
-- [ ] FUT-04 Add report artifact storage, QR verification, checksums, and digital signature metadata.
-- [ ] FUT-05 Add CBC template versioning and immutable published snapshots.
-- [ ] FUT-06 Model senior school pathways, tracks, optional subjects, and learner selections.
-- [ ] FUT-07 Add mobile API standards and offline-friendly sync design.
-- [ ] FUT-08 Add event logging foundation and learner timeline.
-- [ ] FUT-09 Add analytics warehouse and data dictionary plan.
-- [ ] FUT-10 Define module blueprint for transport, hostel, library, clinic, payroll, HR, procurement, LMS, and marketplace.
+- [x] FUT-01 Add notification abstraction for in-app, SMS, email, and push.
+- [x] FUT-02 Add webhook framework for third-party integrations.
+- [x] FUT-03 Add server-side official PDF/report rendering.
+- [x] FUT-04 Add report artifact storage, QR verification, checksums, and digital signature metadata.
+- [x] FUT-05 Add CBC template versioning and immutable published snapshots.
+- [x] FUT-06 Model senior school pathways, tracks, optional subjects, and learner selections.
+- [x] FUT-07 Add mobile API standards and offline-friendly sync design.
+- [x] FUT-08 Add event logging foundation and learner timeline.
+- [x] FUT-09 Add analytics warehouse and data dictionary plan.
+- [x] FUT-10 Define module blueprint for transport, hostel, library, clinic, payroll, HR, procurement, LMS, and marketplace.

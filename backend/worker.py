@@ -28,6 +28,13 @@ async def process_bulk_generate(server, job: dict) -> dict:
 
 async def process_notification_delivery(server, job: dict) -> dict:
     payload = job.get("payload") or {}
+    delivery_ids = payload.get("delivery_ids") or []
+    if delivery_ids:
+        await server.db.notification_deliveries.update_many(
+            {"id": {"$in": delivery_ids}},
+            {"$set": {"job_id": job["id"], "status": "queued_for_provider", "updated_at": server.now_utc()}},
+        )
+        return {"queued": True, "delivery_ids": delivery_ids}
     await server.db.notification_deliveries.insert_one({
         **payload,
         "job_id": job["id"],
@@ -47,11 +54,21 @@ async def process_report_pdf(server, job: dict) -> dict:
     return {"report_job_id": payload.get("report_job_id"), "queued_for_renderer": True}
 
 
+async def process_webhook_delivery(server, job: dict) -> dict:
+    payload = job.get("payload") or {}
+    await server.db.webhook_events.update_one(
+        {"id": payload.get("webhook_event_id")},
+        {"$set": {"status": "queued_for_delivery", "updated_at": server.now_utc()}},
+    )
+    return {"webhook_event_id": payload.get("webhook_event_id"), "queued_for_delivery": True}
+
+
 async def handle_job(server, job: dict) -> None:
     handlers = {
         "bulk_generate_assessment_reports": process_bulk_generate,
         "notification_delivery": process_notification_delivery,
         "assessment_report_pdf": process_report_pdf,
+        "webhook_delivery": process_webhook_delivery,
     }
     handler = handlers.get(job.get("job_type"))
     if not handler:
@@ -64,7 +81,7 @@ async def run_once(server) -> bool:
     job = await claim_next_job(
         server.db,
         worker_id=WORKER_ID,
-        job_types=["bulk_generate_assessment_reports", "notification_delivery", "assessment_report_pdf"],
+        job_types=["bulk_generate_assessment_reports", "notification_delivery", "assessment_report_pdf", "webhook_delivery"],
     )
     if not job:
         return False

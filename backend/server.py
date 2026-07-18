@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -92,7 +92,11 @@ from db_controls import (
 )
 from services.dashboard_summaries import get_school_dashboard_summary
 from services.cache import cache
+from services.events import record_event
 from services.job_queue import enqueue_job
+from services.notifications import queue_notification_batch
+from services.pdf_renderer import render_simple_report_pdf
+from services.report_artifacts import create_report_artifact_manifest
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
 from config import load_secret_file_env, validate_environment
@@ -1240,6 +1244,14 @@ class SupportTicketCreateRequest(BaseModel):
     subject: str
     message: str
     priority: Optional[str] = "normal"
+
+
+class WebhookEndpointRequest(BaseModel):
+    name: str
+    target_url: str
+    event_types: List[str]
+    secret: Optional[str] = None
+    is_active: Optional[bool] = True
 
 
 class BulkGenerateReportsRequest(BaseModel):
@@ -6059,11 +6071,18 @@ async def create_assessment_template(
     if not school_id and role != "super_admin":
         raise HTTPException(status_code=403, detail="No school assigned")
     pathway = normalize_pathway(request.pathway)
+    latest_template = await db.assessment_templates.find_one(
+        {"school_id": school_id, "class_name": request.class_name, "pathway": pathway},
+        sort=[("version", -1), ("created_at", -1)],
+    )
+    next_version = int((latest_template or {}).get("version") or 0) + 1
     template = {
         "id": str(uuid.uuid4()),
         "school_id": school_id,
         "class_name": request.class_name,
         "pathway": pathway,
+        "version": next_version,
+        "supersedes_template_id": (latest_template or {}).get("id"),
         "title": request.title or f"CBC Assessment Template - {request.class_name}",
         "learning_areas": request.learning_areas,
         "competencies": request.competencies or build_named_assessments(DEFAULT_COMPETENCIES),
@@ -6297,7 +6316,6 @@ async def publish_assessment_report(
     notification_docs = [
         {
             "id": str(uuid.uuid4()),
-            "school_id": report["school_id"],
             "student_id": report["student_id"],
             "report_id": report_id,
             "recipient_type": recipient,
@@ -6308,19 +6326,24 @@ async def publish_assessment_report(
         }
         for recipient in recipients
     ]
-    await db.notifications.insert_many(notification_docs)
-    if ASYNC_NOTIFICATIONS:
-        await enqueue_job(
-            db,
-            job_type="notification_delivery",
-            school_id=report["school_id"],
-            payload={
-                "channel": "in_app",
-                "notification_ids": [item["id"] for item in notification_docs],
-                "report_id": report_id,
-            },
-            requested_by=current_user.get("user_id") or current_user.get("id"),
-        )
+    actor_id = current_user.get("user_id") or current_user.get("id")
+    await queue_notification_batch(
+        db,
+        school_id=report["school_id"],
+        notifications=notification_docs,
+        channels=["in_app"],
+        requested_by=actor_id,
+        async_delivery=ASYNC_NOTIFICATIONS,
+    )
+    await record_event(
+        db,
+        event_type="assessment_report_published",
+        school_id=report["school_id"],
+        actor_id=actor_id,
+        entity_type="assessment_report",
+        entity_id=report_id,
+        payload={"student_id": report.get("student_id"), "exam_id": report.get("exam_id")},
+    )
     return api_success(message="Report published")
 
 
@@ -6486,6 +6509,20 @@ async def generate_report_pdf(
     }
 
 
+@api_router.get("/assessments/reports/{report_id}/pdf-official")
+async def generate_official_report_pdf(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    report = await get_assessment_report_for_user(report_id, current_user)
+    filename = f"{report.get('learner_details', {}).get('admission_number') or report_id}-cbc-report.pdf"
+    return Response(
+        content=render_simple_report_pdf(public_report_payload(report)),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename(filename)}"'},
+    )
+
+
 @api_router.post("/assessments/reports/{report_id}/pdf-jobs")
 async def queue_report_pdf_job(
     report_id: str,
@@ -6509,15 +6546,30 @@ async def queue_report_pdf_job(
         "updated_at": now,
     }
     await db.report_jobs.insert_one(job)
+    artifact = await create_report_artifact_manifest(
+        db,
+        report=report,
+        job_id=job_id,
+        requested_by=current_user.get("user_id") or current_user.get("id"),
+    )
     await enqueue_job(
         db,
         job_type="assessment_report_pdf",
         school_id=report.get("school_id"),
-        payload={"report_id": report_id, "report_job_id": job_id},
+        payload={"report_id": report_id, "report_job_id": job_id, "artifact_id": artifact["id"]},
         requested_by=current_user.get("user_id") or current_user.get("id"),
     )
-    await log_security_event("report_pdf_job_queued", current_user, {"job_id": job_id, "report_id": report_id})
-    return api_success(serialize_doc(job), message="PDF generation queued")
+    await record_event(
+        db,
+        event_type="assessment_report_pdf_queued",
+        school_id=report.get("school_id"),
+        actor_id=current_user.get("user_id") or current_user.get("id"),
+        entity_type="assessment_report",
+        entity_id=report_id,
+        payload={"job_id": job_id, "artifact_id": artifact["id"]},
+    )
+    await log_security_event("report_pdf_job_queued", current_user, {"job_id": job_id, "report_id": report_id, "artifact_id": artifact["id"]})
+    return api_success({**serialize_doc(job), "artifact_id": artifact["id"]}, message="PDF generation queued")
 
 
 @api_router.get("/report-jobs/{job_id}")
@@ -7800,6 +7852,81 @@ async def create_school_support_ticket(
     return {"success": True, "message": "Support ticket created", "ticket": serialize_doc(ticket)}
 
 
+@api_router.get("/mobile/sync-manifest")
+async def mobile_sync_manifest(current_user: dict = Depends(get_current_user)):
+    role = normalize_role(current_user.get("role"))
+    school_id = current_user.get("school_id")
+    if role != "super_admin" and not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+    return api_success({
+        "api_version": "v1",
+        "offline_supported": True,
+        "sync_resources": [
+            {"name": "profile", "path": "/api/auth/me", "direction": "pull"},
+            {"name": "announcements", "path": "/api/announcements", "direction": "pull"},
+            {"name": "student_dashboard", "path": "/api/student/dashboard", "direction": "pull"},
+            {"name": "assessment_reports", "path": "/api/assessments/reports", "direction": "pull"},
+        ],
+        "pagination": {"page_param": "page", "limit_param": "limit", "max_limit": 200},
+        "conflict_policy": "server_wins_for_current_records_history_is_append_only",
+    })
+
+
+@api_router.get("/webhooks/endpoints")
+async def list_webhook_endpoints(current_user: dict = Depends(get_current_user)):
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    query = {}
+    if role != "super_admin":
+        query["school_id"] = current_user.get("school_id")
+    endpoints = await db.webhook_endpoints.find(query, {"_id": 0, "secret_hash": 0}).sort("created_at", -1).to_list(200)
+    return api_success(endpoints, count=len(endpoints))
+
+
+@api_router.post("/webhooks/endpoints")
+async def create_webhook_endpoint(data: WebhookEndpointRequest, current_user: dict = Depends(get_current_user)):
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "super_admin"}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    school_id = current_user.get("school_id")
+    if role != "super_admin" and not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+    target_url = str(data.target_url or "").strip()
+    if not target_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Webhook target_url must use HTTPS")
+    event_types = [str(item).strip() for item in data.event_types if str(item).strip()]
+    if not str(data.name or "").strip() or not event_types:
+        raise HTTPException(status_code=400, detail="Webhook name and event_types are required")
+    now = now_utc()
+    secret = data.secret or secrets.token_urlsafe(32)
+    endpoint = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "name": str(data.name or "").strip(),
+        "target_url": target_url,
+        "event_types": event_types,
+        "secret_hash": sha256_hex(secret.encode("utf-8")),
+        "is_active": bool(data.is_active),
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.webhook_endpoints.insert_one(endpoint)
+    await record_event(
+        db,
+        event_type="webhook_endpoint_created",
+        school_id=school_id,
+        actor_id=current_user.get("user_id") or current_user.get("id"),
+        entity_type="webhook_endpoint",
+        entity_id=endpoint["id"],
+        payload={"event_types": event_types},
+    )
+    response = serialize_doc({k: v for k, v in endpoint.items() if k != "secret_hash"})
+    response["signing_secret"] = secret
+    return api_success(response, message="Webhook endpoint created")
+
+
 @api_router.patch("/support-tickets/{ticket_id}")
 async def update_school_support_ticket(
     ticket_id: str,
@@ -8574,6 +8701,8 @@ async def get_or_create_assessment_template(
         "school_id": school_id,
         "class_name": class_name,
         "pathway": query.get("pathway"),
+        "version": 1,
+        "supersedes_template_id": None,
         "title": f"CBC Assessment Template - {class_name}",
         "learning_areas": build_learning_areas(default_learning_area_names(class_name, normalized_pathway)),
         "competencies": build_named_assessments(DEFAULT_COMPETENCIES),
@@ -8609,6 +8738,8 @@ async def build_report_from_template(
         "class_name": student.get("class_name") or exam.get("class_name"),
         "stream": student.get("stream"),
         "pathway": template.get("pathway"),
+        "template_version": int(template.get("version") or 1),
+        "template_snapshot": serialize_doc(copy.deepcopy(template)),
         "status": "draft",
         "learner_details": {
             "full_name": student.get("full_name"),
@@ -9020,6 +9151,13 @@ async def ensure_database_indexes():
         (db.audit_logs, [("action", 1), ("timestamp", -1)], {"name": "audit_logs_action_timestamp_idx"}),
         (db.frontend_error_events, [("portal", 1), ("route", 1), ("created_at", -1)], {"name": "frontend_error_events_portal_route_created_idx"}),
         (db.frontend_error_events, [("created_at", -1)], {"name": "frontend_error_events_created_idx"}),
+        (db.event_log, [("school_id", 1), ("event_type", 1), ("created_at", -1)], {"name": "event_log_school_type_created_idx"}),
+        (db.event_log, [("entity_type", 1), ("entity_id", 1), ("created_at", -1)], {"name": "event_log_entity_created_idx"}),
+        (db.report_artifacts, [("school_id", 1), ("report_id", 1), ("artifact_type", 1)], {"name": "report_artifacts_report_type_idx"}),
+        (db.report_artifacts, [("qr_verification_token", 1)], {"unique": True, "name": "report_artifacts_qr_token_idx"}),
+        (db.webhook_endpoints, [("school_id", 1), ("event_types", 1), ("is_active", 1)], {"name": "webhook_endpoints_school_events_active_idx"}),
+        (db.webhook_events, [("school_id", 1), ("event_type", 1), ("status", 1), ("created_at", -1)], {"name": "webhook_events_school_type_status_created_idx"}),
+        (db.assessment_templates, [("school_id", 1), ("class_name", 1), ("pathway", 1), ("version", -1)], {"name": "assessment_templates_version_idx"}),
     ]
 
     for collection, keys, options in index_specs:
