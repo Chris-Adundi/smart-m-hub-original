@@ -50,13 +50,13 @@ This checklist consolidates every approved improvement from the architecture rev
 
 ## Phase 5 - API Improvements
 
-- [ ] API-01 Introduce `/api/v1` routes as aliases for existing endpoints.
-- [ ] API-02 Standardize response envelopes.
-- [ ] API-03 Standardize error envelopes and error codes.
-- [ ] API-04 Replace raw `dict` request bodies with Pydantic schemas.
-- [ ] API-05 Add OpenAPI tags, operation IDs, and examples.
-- [ ] API-06 Add backward-compatible deprecation policy.
-- [ ] API-07 Move mutation parameters from query string into request bodies where appropriate.
+- [x] API-01 Introduce `/api/v1` routes as aliases for existing endpoints.
+- [x] API-02 Standardize response envelopes.
+- [x] API-03 Standardize error envelopes and error codes.
+- [x] API-04 Replace raw `dict` request bodies with Pydantic schemas.
+- [x] API-05 Add OpenAPI tags, operation IDs, and examples.
+- [x] API-06 Add backward-compatible deprecation policy.
+- [x] API-07 Move mutation parameters from query string into request bodies where appropriate.
 
 ## Phase 6 - Frontend Improvements
 

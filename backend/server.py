@@ -1,4 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, UploadFile, File, Form
+from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +17,7 @@ import uuid
 import re
 import secrets
 import string
+import copy
 
 from pathlib import Path
 from pydantic import BaseModel, EmailStr
@@ -169,7 +173,18 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+    request.state.request_id = request_id
+    original_path = request.scope.get("path", "")
+    if original_path == "/api/v1":
+        request.scope["path"] = "/api"
+    elif original_path.startswith("/api/v1/"):
+        request.scope["path"] = "/api/" + original_path[len("/api/v1/"):]
     response = await call_next(request)
+    response.headers.setdefault("X-Request-ID", request_id)
+    if original_path.startswith("/api/") and not original_path.startswith("/api/v1/"):
+        response.headers.setdefault("Deprecation", "true")
+        response.headers.setdefault("Link", '</api/v1>; rel="successor-version"')
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -181,6 +196,55 @@ async def add_security_headers(request: Request, call_next):
             "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:; frame-ancestors 'none'",
         )
     return response
+
+
+def error_code_for_status(status_code: int) -> str:
+    return {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "permission_denied",
+        404: "not_found",
+        409: "conflict",
+        413: "payload_too_large",
+        422: "validation_error",
+        423: "locked",
+        429: "rate_limited",
+        500: "internal_error",
+        503: "service_unavailable",
+    }.get(status_code, "api_error")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    body = {
+        "success": False,
+        "error": {
+            "code": error_code_for_status(exc.status_code),
+            "message": message,
+            "details": exc.detail if not isinstance(exc.detail, str) else {},
+        },
+        "detail": exc.detail,
+        "message": message,
+        "request_id": getattr(request.state, "request_id", None),
+    }
+    return JSONResponse(status_code=exc.status_code, content=body, headers=getattr(exc, "headers", None))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = {
+        "success": False,
+        "error": {
+            "code": "validation_error",
+            "message": "Request validation failed",
+            "details": exc.errors(),
+        },
+        "detail": exc.errors(),
+        "message": "Request validation failed",
+        "request_id": getattr(request.state, "request_id", None),
+    }
+    return JSONResponse(status_code=422, content=body)
 
 # =====================================================
 # ROUTERS
@@ -1011,6 +1075,27 @@ class RefreshTokenRequest(BaseModel):
 
 class MFASetupRequest(BaseModel):
     code: Optional[str] = None
+
+
+class PasswordPayload(BaseModel):
+    password: str
+    confirm_password: Optional[str] = None
+
+
+class StaffStatusPayload(BaseModel):
+    status: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class SupportTicketCreateRequest(BaseModel):
+    subject: str
+    message: str
+    priority: Optional[str] = "normal"
+
+
+class BulkGenerateReportsRequest(BaseModel):
+    exam_id: str
+    async_mode: Optional[bool] = True
 
 
 class VerifyResetCodeRequest(BaseModel):
@@ -2152,11 +2237,12 @@ async def update_staff(
 @api_router.patch("/staff/{user_id}/status")
 async def update_staff_status(
     user_id: str,
-    payload: dict,
+    payload: Any,
     current_user: dict = Depends(get_current_user)
 ):
     target = await require_school_admin_staff_target(user_id, current_user)
-    requested = str(payload.get("status") or "").strip().lower()
+    payload_data = payload.model_dump(exclude_none=True) if hasattr(payload, "model_dump") else dict(payload or {})
+    requested = str(payload_data.get("status") or "").strip().lower()
     if requested not in {"active", "suspended", "inactive", "deactivated"}:
         raise HTTPException(status_code=400, detail="Status must be active, suspended, inactive, or deactivated")
     actor_id = current_user.get("user_id") or current_user.get("id")
@@ -2166,14 +2252,14 @@ async def update_staff_status(
         "approval_status": "approved" if requested == "active" else requested,
         "is_active": requested == "active",
         "is_suspended": requested in {"suspended", "deactivated"},
-        "status_reason": payload.get("reason"),
+        "status_reason": payload_data.get("reason"),
         "updated_by": actor_id,
         "updated_at": now,
     }
     await db.users.update_one({"id": target.get("id"), "school_id": target.get("school_id")}, {"$set": user_updates})
     await db.staff.update_one(
         {"school_id": target.get("school_id"), "user_id": str(target.get("id") or target.get("_id"))},
-        {"$set": {"status": requested, "updated_by": actor_id, "updated_at": now}},
+        {"$set": {"status": requested, "status_reason": payload_data.get("reason"), "updated_by": actor_id, "updated_at": now}},
     )
     await log_security_event("staff_status_updated", current_user, {"staff_user_id": user_id, "status": requested})
     return api_success(message=f"Staff member {requested}")
@@ -2190,30 +2276,30 @@ async def activate_staff(
 @api_router.patch("/staff/{user_id}/suspend")
 async def suspend_staff(
     user_id: str,
-    payload: dict,
+    payload: StaffStatusPayload,
     current_user: dict = Depends(get_current_user)
 ):
-    return await update_staff_status(user_id, {"status": "suspended", "reason": payload.get("reason")}, current_user)
+    return await update_staff_status(user_id, {"status": "suspended", "reason": payload.reason}, current_user)
 
 
 @api_router.patch("/staff/{user_id}/deactivate")
 async def deactivate_staff(
     user_id: str,
-    payload: dict,
+    payload: StaffStatusPayload,
     current_user: dict = Depends(get_current_user)
 ):
-    return await update_staff_status(user_id, {"status": "deactivated", "reason": payload.get("reason")}, current_user)
+    return await update_staff_status(user_id, {"status": "deactivated", "reason": payload.reason}, current_user)
 
 
 @api_router.patch("/staff/{user_id}/reset-password")
 async def reset_staff_password(
     user_id: str,
-    payload: dict,
+    payload: PasswordPayload,
     current_user: dict = Depends(get_current_user)
 ):
     target = await require_school_admin_staff_target(user_id, current_user)
-    password = str(payload.get("password") or "")
-    confirm_password = payload.get("confirm_password")
+    password = str(payload.password or "")
+    confirm_password = payload.confirm_password
     if confirm_password is not None and password != str(confirm_password):
         raise HTTPException(status_code=400, detail="Passwords do not match")
     validate_password_strength(password)
@@ -2245,7 +2331,7 @@ async def list_staff_password_reset_requests(current_user: dict = Depends(get_cu
 @api_router.post("/staff/password-reset-requests/{request_id}/complete")
 async def complete_staff_password_reset_request(
     request_id: str,
-    payload: dict,
+    payload: PasswordPayload,
     current_user: dict = Depends(get_current_user)
 ):
     role = normalize_role(current_user.get("role"))
@@ -2268,8 +2354,8 @@ async def complete_staff_password_reset_request(
     if role != "super_admin":
         require_can_manage_staff(current_user, target)
 
-    password = str(payload.get("password") or "")
-    confirm_password = payload.get("confirm_password")
+    password = str(payload.password or "")
+    confirm_password = payload.confirm_password
     if confirm_password is not None and password != str(confirm_password):
         raise HTTPException(status_code=400, detail="Passwords do not match")
     validate_password_strength(password)
@@ -6186,6 +6272,15 @@ async def queue_bulk_generate_assessment_reports(
     return await bulk_generate_assessment_reports(request, exam_id, True, current_user)
 
 
+@api_router.post("/assessments/reports/bulk-generate-jobs/request")
+async def queue_bulk_generate_assessment_reports_from_body(
+    payload: BulkGenerateReportsRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    return await bulk_generate_assessment_reports(request, payload.exam_id, payload.async_mode, current_user)
+
+
 @api_router.post("/assessments/reports/bulk-publish")
 async def bulk_publish_assessment_reports(
     request: Request,
@@ -7519,7 +7614,7 @@ async def get_school_support_tickets(current_user: dict = Depends(get_current_us
 @api_router.post("/support-tickets")
 async def create_school_support_ticket(
     request: Request,
-    data: dict,
+    data: SupportTicketCreateRequest,
     current_user: dict = Depends(get_current_user)
 ):
     school_id = current_user.get("school_id")
@@ -7531,8 +7626,8 @@ async def create_school_support_ticket(
         raise HTTPException(status_code=403, detail="Unauthorized")
     await enforce_rate_limit("support_ticket", request_fingerprint(request, current_user.get("user_id"), school_id))
 
-    subject = str(data.get("subject") or "").strip()
-    message = str(data.get("message") or "").strip()
+    subject = str(data.subject or "").strip()
+    message = str(data.message or "").strip()
     if not subject or not message:
         raise HTTPException(status_code=400, detail="Subject and message are required")
 
@@ -7541,7 +7636,7 @@ async def create_school_support_ticket(
         "school_id": school_id,
         "subject": subject,
         "message": message,
-        "priority": data.get("priority") or "normal",
+        "priority": data.priority or "normal",
         "status": "open",
         "created_by": current_user.get("user_id") or current_user.get("id"),
         "created_by_email": current_user.get("email"),
@@ -8787,6 +8882,39 @@ async def startup_tasks():
 
 
 app.include_router(api_router)
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title="Smart M Hub API",
+        version="1.0.0",
+        description="Smart M Hub school management API. Legacy /api routes remain supported; /api/v1 routes are compatibility aliases for new clients.",
+        routes=app.routes,
+    )
+    paths = schema.get("paths", {})
+    for path, path_schema in list(paths.items()):
+        if path.startswith("/api/"):
+            domain = path.split("/")[2] if len(path.split("/")) > 2 else "api"
+            for operation in path_schema.values():
+                if isinstance(operation, dict):
+                    tags = operation.setdefault("tags", [])
+                    if domain not in tags:
+                        tags.insert(0, domain)
+        if path.startswith("/api/") and not path.startswith("/api/v1/"):
+            v1_schema = copy.deepcopy(path_schema)
+            paths[f"/api/v1/{path[len('/api/'):]}"] = v1_schema
+            for operation in v1_schema.values():
+                if isinstance(operation, dict):
+                    tags = operation.setdefault("tags", [])
+                    if "v1" not in tags:
+                        tags.append("v1")
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 # =========================
