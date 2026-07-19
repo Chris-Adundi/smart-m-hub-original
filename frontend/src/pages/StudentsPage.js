@@ -28,10 +28,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { apiClient } from "@/App";
+import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus, Search } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
+import { ALL_CBC_CLASSES, classLevelsForSchool } from "@/utils/schoolClasses";
 
 const initialForm = {
   admission_number: "",
@@ -71,21 +72,6 @@ const initialForm = {
   documents_attached: [],
 };
 
-export const CLASS_LEVELS = [
-  {
-    label: "Primary",
-    classes: ["PP1", "PP2", "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6"],
-  },
-  {
-    label: "Junior Secondary",
-    classes: ["Grade 7", "Grade 8", "Grade 9"],
-  },
-  {
-    label: "Senior Secondary",
-    classes: ["Grade 10", "Grade 11", "Grade 12"],
-  },
-];
-
 const textFields = [
   ["full_name", "Full Name"],
   ["date_of_birth", "Date of Birth", "date"],
@@ -94,22 +80,21 @@ const textFields = [
   ["religion", "Religion"],
   ["stream", "Stream"],
   ["year_of_study", "Boarding/Day"],
-  ["guardian_name", "Guardian 1 Name"],
-  ["guardian_phone", "Guardian 1 Phone"],
-  ["guardian_email", "Guardian 1 Email", "email"],
-  ["guardian_occupation", "Guardian 1 Occupation"],
-  ["guardian_national_id", "Guardian 1 National ID"],
-  ["guardian_address", "Guardian 1 Physical Address"],
-  ["secondary_guardian_name", "Guardian 2 Name"],
-  ["secondary_guardian_relationship", "Guardian 2 Relationship"],
-  ["secondary_guardian_phone", "Guardian 2 Phone"],
-  ["secondary_guardian_email", "Guardian 2 Email", "email"],
-  ["secondary_guardian_occupation", "Guardian 2 Occupation"],
-  ["secondary_guardian_national_id", "Guardian 2 National ID"],
-  ["secondary_guardian_address", "Guardian 2 Physical Address"],
+  ["guardian_name", "Parent/Guardian 1 Name"],
+  ["guardian_phone", "Parent/Guardian 1 Phone"],
+  ["guardian_email", "Parent/Guardian 1 Email", "email"],
+  ["guardian_occupation", "Parent/Guardian 1 Occupation"],
+  ["guardian_national_id", "Parent/Guardian 1 National ID"],
+  ["guardian_address", "Parent/Guardian 1 Physical Address"],
+  ["secondary_guardian_name", "Parent/Guardian 2 Name"],
+  ["secondary_guardian_relationship", "Parent/Guardian 2 Relationship"],
+  ["secondary_guardian_phone", "Parent/Guardian 2 Phone"],
+  ["secondary_guardian_email", "Parent/Guardian 2 Email", "email"],
+  ["secondary_guardian_occupation", "Parent/Guardian 2 Occupation"],
+  ["secondary_guardian_national_id", "Parent/Guardian 2 National ID"],
+  ["secondary_guardian_address", "Parent/Guardian 2 Physical Address"],
   ["previous_school", "Previous School"],
   ["transfer_reason", "Reason for Transfer"],
-  ["last_class", "Last Class"],
 ];
 
 const StudentsPage = () => {
@@ -121,10 +106,21 @@ const StudentsPage = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [formData, setFormData] = useState(initialForm);
+  const [schoolProfile, setSchoolProfile] = useState(() => authService.getUser()?.school_branding || {});
 
   useEffect(() => {
     fetchStudents();
+    fetchSchoolProfile();
   }, []);
+
+  const fetchSchoolProfile = async () => {
+    try {
+      const response = await apiClient.get("/school/profile");
+      setSchoolProfile(response?.data?.data || authService.getUser()?.school_branding || {});
+    } catch {
+      setSchoolProfile(authService.getUser()?.school_branding || {});
+    }
+  };
 
   const fetchStudents = async () => {
     setLoading(true);
@@ -203,7 +199,7 @@ const StudentsPage = () => {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold text-white">Students</h2>
-          <p className="text-slate-400 mt-1">Admissions, profiles, guardians and history</p>
+          <p className="text-slate-400 mt-1">Admissions, profiles, parent/guardian details and history</p>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -221,7 +217,10 @@ const StudentsPage = () => {
               <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label>Admission Number</Label>
-                  <Input value="Generated automatically if left blank" readOnly />
+                  <Input
+                    value={formData.admission_number}
+                    onChange={(e) => updateField("admission_number", e.target.value)}
+                  />
                 </div>
                 <div>
                   <Label>Passport Photo</Label>
@@ -262,13 +261,24 @@ const StudentsPage = () => {
                   <Select value={formData.class_name} onValueChange={(value) => updateField("class_name", value)}>
                     <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
                     <SelectContent>
-                      {CLASS_LEVELS.map((level) => (
+                      {classLevelsForSchool(schoolProfile).map((level) => (
                         <div key={level.label}>
                           <div className="px-2 py-1 text-xs font-semibold text-slate-500">{level.label}</div>
                           {level.classes.map((className) => (
                             <SelectItem key={className} value={className}>{className}</SelectItem>
                           ))}
                         </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Last Class</Label>
+                  <Select value={formData.last_class} onValueChange={(value) => updateField("last_class", value)}>
+                    <SelectTrigger><SelectValue placeholder="Select last class" /></SelectTrigger>
+                    <SelectContent>
+                      {ALL_CBC_CLASSES.map((className) => (
+                        <SelectItem key={className} value={className}>{className}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -342,7 +352,7 @@ const StudentsPage = () => {
                 <TableHead>Full Name</TableHead>
                 <TableHead>Class</TableHead>
                 <TableHead>Level</TableHead>
-                <TableHead>Guardian</TableHead>
+                <TableHead>Parent/Guardian</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Approval</TableHead>
               </TableRow>
@@ -355,7 +365,12 @@ const StudentsPage = () => {
               ) : (
                 filteredStudents.map((student) => (
                   <TableRow key={student.id} className="cursor-pointer" onClick={() => openProfile(student)}>
-                    <TableCell>{student.admission_number}</TableCell>
+                    <TableCell>
+                      <div>{student.admission_number || "-"}</div>
+                      {student.student_access_code && (
+                        <div className="text-xs text-emerald-400">{student.student_access_code}</div>
+                      )}
+                    </TableCell>
                     <TableCell>{student.full_name}</TableCell>
                     <TableCell>{student.class_name}</TableCell>
                     <TableCell>{student.education_level || "-"}</TableCell>
@@ -391,17 +406,19 @@ const StudentsPage = () => {
                 )}
                 <div>
                   <p className="text-white font-semibold">{selectedStudent.full_name}</p>
-                  <p className="text-slate-400 text-sm">{selectedStudent.admission_number}</p>
+                  <p className="text-slate-400 text-sm">
+                    {selectedStudent.admission_number || selectedStudent.student_access_code}
+                  </p>
                 </div>
               </div>
               <TabsList className="flex flex-wrap h-auto">
-                {["overview", "personal", "guardians", "academics", "attendance", "finance", "discipline", "medical", "communication", "history"].map((tab) => (
+                {["overview", "personal", "parent/guardians", "academics", "attendance", "finance", "discipline", "medical", "communication", "history"].map((tab) => (
                   <TabsTrigger key={tab} value={tab}>{tab}</TabsTrigger>
                 ))}
               </TabsList>
               <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_access_code", "student_id", "full_name", "status", "approval_status"])} />
               <ProfileTab value="personal" data={pick(selectedStudent, ["gender", "date_of_birth", "birth_certificate_no", "nationality", "religion", "special_needs"])} />
-              <ProfileTab value="guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
+              <ProfileTab value="parent/guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
               <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school", "transfer_reason", "last_class"])} />
               <ProfileTab value="attendance" data={{ note: "Attendance history is preserved through the attendance module." }} />
               <ProfileTab value="finance" data={{ note: "Fee balances and receipts are managed through Finance and Student Portal." }} />
@@ -421,13 +438,20 @@ function pick(obj, keys) {
   return keys.reduce((acc, key) => ({ ...acc, [key]: obj?.[key] ?? "" }), {});
 }
 
+function formatProfileLabel(key) {
+  return key
+    .replace(/^secondary_guardian_/, "parent/guardian 2 ")
+    .replace(/^guardian_/, "parent/guardian 1 ")
+    .replaceAll("_", " ");
+}
+
 function ProfileTab({ value, data }) {
   return (
     <TabsContent value={value}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
         {Object.entries(data).map(([key, val]) => (
           <div key={key} className="bg-[#0F172A] border border-[#1E293B] rounded-lg p-3">
-            <p className="text-xs text-slate-400 capitalize">{key.replaceAll("_", " ")}</p>
+            <p className="text-xs text-slate-400 capitalize">{formatProfileLabel(key)}</p>
             <p className="text-white break-words">{String(val || "-")}</p>
           </div>
         ))}

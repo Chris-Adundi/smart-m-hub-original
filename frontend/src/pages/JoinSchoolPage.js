@@ -119,7 +119,7 @@ const JoinSchoolPage = () => {
     if (!formData.password) return toast.error("Password is required");
     if (!formData.role) return toast.error("Please select a role");
     if (isParent && (!formData.child_name.trim() || !formData.child_admission_number.trim())) {
-      return toast.error("Child name and admission number are required");
+      return toast.error("Child name and admission number or student access code are required");
     }
 
     try {
@@ -243,7 +243,7 @@ const JoinSchoolPage = () => {
                   <Input value={formData.child_name} onChange={(e) => updateField("child_name", e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Child Admission Number</Label>
+                  <Label>Child Admission Number or Student Access Code</Label>
                   <Input
                     value={formData.child_admission_number}
                     onChange={(e) => updateField("child_admission_number", e.target.value)}

@@ -133,22 +133,24 @@ const InventoryPage = () => {
               Add Item
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Inventory Item" : "New Inventory Item"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={saveItem} className="space-y-4">
-              {[
-                ["name", "Item Name"],
-                ["category", "Category"],
-                ["location", "Location"],
-                ["condition", "Condition"],
-              ].map(([field, label]) => (
-                <div className="space-y-2" key={field}>
-                  <Label>{label}</Label>
-                  <Input value={form[field] || ""} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required={field === "name"} />
-                </div>
-              ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                  ["name", "Item Name"],
+                  ["category", "Category"],
+                  ["location", "Location"],
+                  ["condition", "Condition"],
+                ].map(([field, label]) => (
+                  <div className="space-y-2" key={field}>
+                    <Label>{label}</Label>
+                    <Input value={form[field] || ""} onChange={(e) => setForm({ ...form, [field]: e.target.value })} required={field === "name"} />
+                  </div>
+                ))}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Quantity</Label>
@@ -168,7 +170,9 @@ const InventoryPage = () => {
                 <Input type="file" accept="image/*,.pdf" onChange={(e) => uploadInventoryFile(e.target.files?.[0])} />
                 {form.document_url && <p className="text-xs text-emerald-400">Inventory file uploaded</p>}
               </div>
-              <Button type="submit" className="w-full">Save Item</Button>
+              <div className="sticky bottom-0 bg-background pt-3">
+                <Button type="submit" className="w-full">Save Item</Button>
+              </div>
             </form>
           </DialogContent>
         </Dialog>

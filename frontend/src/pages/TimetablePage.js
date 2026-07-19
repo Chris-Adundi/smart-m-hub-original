@@ -18,10 +18,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { apiClient } from "@/App";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon, Plus } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
+import { ALL_CBC_CLASSES } from "@/utils/schoolClasses";
 
 const initialForm = {
   class_name: "",
@@ -120,8 +128,18 @@ const TimetablePage = () => {
               <DialogTitle>{editing ? "Edit Timetable Entry" : "New Timetable Entry"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={saveEntry} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Class</Label>
+                <Select value={form.class_name} onValueChange={(value) => setForm({ ...form, class_name: value })}>
+                  <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                  <SelectContent>
+                    {ALL_CBC_CLASSES.map((className) => (
+                      <SelectItem key={className} value={className}>{className}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               {[
-                ["class_name", "Class"],
                 ["day", "Day"],
                 ["subject", "Subject"],
                 ["time", "Time"],

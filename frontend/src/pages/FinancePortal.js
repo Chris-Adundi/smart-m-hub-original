@@ -42,7 +42,7 @@ import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
-import { CLASS_LEVELS } from "@/pages/StudentsPage";
+import { classLevelsForSchool } from "@/utils/schoolClasses";
 
 // =========================
 // SAFE NUMBER FORMATTER
@@ -66,6 +66,7 @@ const FinancePortal = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [feeProfile, setFeeProfile] = useState(null);
+  const [schoolProfile, setSchoolProfile] = useState(() => authService.getUser()?.school_branding || {});
 
   const [txnForm, setTxnForm] = useState({
     transaction_type: "income",
@@ -110,12 +111,13 @@ const FinancePortal = () => {
       try {
         setLoading(true);
 
-        const [paymentsRes, txnRes, summaryRes, feesRes, studentsRes] = await Promise.all([
+        const [paymentsRes, txnRes, summaryRes, feesRes, studentsRes, schoolRes] = await Promise.all([
           apiClient.get("/payments?approval_status=all").catch(() => ({ data: [] })),
           apiClient.get("/finance/transactions").catch(() => ({ data: [] })),
           apiClient.get("/finance/summary").catch(() => ({ data: {} })),
           apiClient.get("/finance/fee-structures").catch(() => ({ data: [] })),
           apiClient.get("/students?approval_status=approved").catch(() => ({ data: [] })),
+          apiClient.get("/school/profile").catch(() => ({ data: null })),
         ]);
 
         if (!mounted) return;
@@ -151,6 +153,7 @@ const FinancePortal = () => {
               studentsRes?.data?.students ||
               []
         );
+        setSchoolProfile(schoolRes?.data?.data || authService.getUser()?.school_branding || {});
       } catch (error) {
         toast.error("Failed to fetch finance data");
       } finally {
@@ -314,7 +317,7 @@ const FinancePortal = () => {
                 <Select value={feeForm.class_name} onValueChange={(value) => setFeeForm({ ...feeForm, class_name: value })}>
                   <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
                   <SelectContent>
-                    {CLASS_LEVELS.map((level) => (
+                    {classLevelsForSchool(schoolProfile).map((level) => (
                       <div key={level.label}>
                         <div className="px-2 py-1 text-xs font-semibold text-slate-500">{level.label}</div>
                         {level.classes.map((className) => (

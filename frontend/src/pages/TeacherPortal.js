@@ -31,15 +31,14 @@ import { Badge } from "@/components/ui/badge";
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { uploadManagedFile } from "@/utils/uploads";
+import jsPDF from "jspdf";
+import { CBC_GRADE_OPTIONS, gradeToMarks, learningAreasForClass } from "@/utils/schoolClasses";
 
 import {
-  Plus,
   BookOpen,
   Users,
   ClipboardList,
   Award,
-  TrendingUp,
-  Download,
   Eye,
   Search,
 } from "lucide-react";
@@ -79,16 +78,6 @@ const normalizeRole = (role) => {
 };
 
 /* =========================
-   GRADE HELPERS
-========================= */
-const calculateCBEGrade = (marks) => {
-  if (marks >= 80) return "EE1";
-  if (marks >= 60) return "ME1";
-  if (marks >= 40) return "AE1";
-  return "BE1";
-};
-
-/* =========================
    COMPONENT
 ========================= */
 const TeacherPortal = () => {
@@ -118,11 +107,13 @@ const TeacherPortal = () => {
     exam_id: "",
     student_id: "",
     subject: "",
-    marks: "",
+    grade: "",
     teacher_comments: "",
     report_url: "",
     result_type: "assessment",
   });
+  const [assessmentDrafts, setAssessmentDrafts] = useState([]);
+  const [subjectIndex, setSubjectIndex] = useState(0);
 
   const [attendanceForm, setAttendanceForm] = useState({
     student_id: "",
@@ -183,6 +174,94 @@ const TeacherPortal = () => {
     return list.filter((a) => String(a?.date || "").startsWith(today)).length;
   }, [attendance]);
 
+  const selectedAssessmentStudent = useMemo(
+    () => asArray(students).find((student) => student.id === resultForm.student_id) || null,
+    [students, resultForm.student_id]
+  );
+
+  const subjectOptions = useMemo(
+    () => learningAreasForClass(selectedAssessmentStudent?.class_name),
+    [selectedAssessmentStudent?.class_name]
+  );
+
+  const mergeCurrentDraft = () => {
+    const subject = String(resultForm.subject || subjectOptions[subjectIndex] || "").trim();
+    if (!resultForm.exam_id || !resultForm.student_id || !subject || !resultForm.grade) {
+      toast.error("Select student, exam, subject and CBC grade");
+      return null;
+    }
+
+    const current = {
+      exam_id: resultForm.exam_id,
+      student_id: resultForm.student_id,
+      subject,
+      grade: resultForm.grade,
+      teacher_comments: resultForm.teacher_comments,
+      report_url: resultForm.report_url,
+      result_type: "assessment",
+    };
+
+    const nextDrafts = [
+      ...assessmentDrafts.filter((draft) => draft.subject !== subject),
+      current,
+    ];
+    setAssessmentDrafts(nextDrafts);
+    return nextDrafts;
+  };
+
+  const loadDraftForSubject = (subject, drafts = assessmentDrafts) => {
+    const existing = drafts.find((draft) => draft.subject === subject);
+    setResultForm((prev) => ({
+      ...prev,
+      subject,
+      grade: existing?.grade || "",
+      teacher_comments: existing?.teacher_comments || "",
+      report_url: existing?.report_url || prev.report_url || "",
+      result_type: "assessment",
+    }));
+  };
+
+  const saveAndNextSubject = () => {
+    const nextDrafts = mergeCurrentDraft();
+    if (!nextDrafts) return;
+
+    const nextIndex = Math.min(subjectIndex + 1, subjectOptions.length - 1);
+    setSubjectIndex(nextIndex);
+    loadDraftForSubject(subjectOptions[nextIndex], nextDrafts);
+    toast.success(nextIndex === subjectIndex ? "Subject saved" : "Subject saved. Continue with the next subject.");
+  };
+
+  const generateAssessmentSummaryPdf = (student, exam, drafts) => {
+    const doc = new jsPDF();
+    const counts = drafts.reduce((acc, draft) => {
+      const band = String(draft.grade || "").slice(0, 2);
+      acc[band] = (acc[band] || 0) + 1;
+      return acc;
+    }, {});
+    const strongest = ["EE", "ME", "AE", "BE"].find((band) => counts[band]) || "-";
+
+    doc.setFontSize(16);
+    doc.text("CBC Assessment Report", 15, 18);
+    doc.setFontSize(11);
+    doc.text(`Learner: ${student?.full_name || "-"}`, 15, 32);
+    doc.text(`Class: ${student?.class_name || "-"}`, 15, 40);
+    doc.text(`Admission/Access: ${student?.admission_number || student?.student_access_code || "-"}`, 15, 48);
+    doc.text(`Exam: ${exam?.name || "-"}`, 15, 56);
+    doc.text(`General Performance: ${strongest}`, 15, 64);
+
+    let y = 78;
+    drafts.forEach((draft, index) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(`${index + 1}. ${draft.subject}: ${draft.grade} - ${draft.teacher_comments || "No remarks"}`, 15, y);
+      y += 9;
+    });
+
+    doc.save(`${student?.admission_number || student?.student_access_code || "assessment"}-cbc-assessment.pdf`);
+  };
+
   /* =========================
      SUBMIT RESULT
   ========================= */
@@ -190,25 +269,32 @@ const TeacherPortal = () => {
     e.preventDefault();
 
     try {
-      const marks = Number(resultForm.marks || 0);
+      const drafts = mergeCurrentDraft();
+      if (!drafts || drafts.length === 0) return;
 
-      await apiClient.post("/results", {
-        ...resultForm,
-        marks,
-        grade: calculateCBEGrade(marks),
-      });
+      const exam = asArray(exams).find((item) => item.id === resultForm.exam_id);
 
-      toast.success("Result submitted");
+      await Promise.all(drafts.map((draft) =>
+        apiClient.post("/results", {
+          ...draft,
+          marks: gradeToMarks(draft.grade),
+        })
+      ));
+
+      generateAssessmentSummaryPdf(selectedAssessmentStudent, exam, drafts);
+      toast.success("Assessment submitted and report downloaded");
 
       setResultForm({
         exam_id: "",
         student_id: "",
         subject: "",
-        marks: "",
+        grade: "",
         teacher_comments: "",
         report_url: "",
         result_type: "assessment",
       });
+      setAssessmentDrafts([]);
+      setSubjectIndex(0);
 
       setResultsDialogOpen(false);
       fetchTeacherData();
@@ -218,10 +304,17 @@ const TeacherPortal = () => {
   };
 
   const openResultDialog = (student = null) => {
+    const classSubjects = learningAreasForClass(student?.class_name);
     setResultForm((prev) => ({
       ...prev,
       student_id: student?.id || "",
+      subject: classSubjects[0] || "",
+      grade: "",
+      teacher_comments: "",
+      result_type: "assessment",
     }));
+    setAssessmentDrafts([]);
+    setSubjectIndex(0);
     setResultsDialogOpen(true);
   };
 
@@ -321,7 +414,7 @@ const TeacherPortal = () => {
           Welcome back {user?.full_name || "Teacher"}
         </p>
         <p className="text-slate-500 text-sm mt-1">
-          Assigned classes: {[...new Set(asArray(students).map((s) => s.class_name).filter(Boolean))].join(", ") || "No assigned class records yet"}
+          Class learners: {[...new Set(asArray(students).map((s) => s.class_name).filter(Boolean))].join(", ") || "No class records assigned yet"}
         </p>
       </div>
 
@@ -359,14 +452,14 @@ const TeacherPortal = () => {
         </Button>
         <Button onClick={() => openResultDialog()}>
           <Award className="w-4 h-4 mr-2" />
-          Result
+          CBC Assessment
         </Button>
       </div>
 
       {/* SAFE LIST */}
       <Card>
         <CardHeader>
-          <CardTitle>Students</CardTitle>
+          <CardTitle>Assigned Class Learners</CardTitle>
         </CardHeader>
 
         <CardContent>
@@ -388,7 +481,7 @@ const TeacherPortal = () => {
                     View
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => openAttendanceDialog(s)}>Attendance</Button>
-                  <Button size="sm" onClick={() => openResultDialog(s)}>Result</Button>
+                  <Button size="sm" onClick={() => openResultDialog(s)}>CBC Assessment</Button>
                 </div>
               </div>
             ))
@@ -397,18 +490,34 @@ const TeacherPortal = () => {
       </Card>
 
       <Dialog open={resultsDialogOpen} onOpenChange={setResultsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Submit Assessment Result</DialogTitle>
+            <DialogTitle>Submit CBC Assessment</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmitResult} className="space-y-4">
             <div className="space-y-2">
               <Label>Student</Label>
-              <Select value={resultForm.student_id} onValueChange={(value) => setResultForm({ ...resultForm, student_id: value })}>
+              <Select
+                value={resultForm.student_id}
+                onValueChange={(value) => {
+                  const student = asArray(students).find((item) => item.id === value);
+                  const subjects = learningAreasForClass(student?.class_name);
+                  setAssessmentDrafts([]);
+                  setSubjectIndex(0);
+                  setResultForm({
+                    ...resultForm,
+                    student_id: value,
+                    subject: subjects[0] || "",
+                    grade: "",
+                    teacher_comments: "",
+                    result_type: "assessment",
+                  });
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Select student" /></SelectTrigger>
                 <SelectContent>
                   {asArray(students).map((student) => (
-                    <SelectItem key={student.id} value={student.id}>{student.full_name} - {student.admission_number}</SelectItem>
+                    <SelectItem key={student.id} value={student.id}>{student.full_name} - {student.admission_number || student.student_access_code}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -424,22 +533,52 @@ const TeacherPortal = () => {
                 </SelectContent>
               </Select>
             </div>
-            <Input placeholder="Subject" value={resultForm.subject} onChange={(e) => setResultForm({ ...resultForm, subject: e.target.value })} required />
-            <Select value={resultForm.result_type} onValueChange={(value) => setResultForm({ ...resultForm, result_type: value })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="assessment">Assessment</SelectItem>
-                <SelectItem value="exam">Exam</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input type="number" placeholder="Marks" value={resultForm.marks} onChange={(e) => setResultForm({ ...resultForm, marks: e.target.value })} required />
+            <div className="grid md:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Subject / Learning Area</Label>
+                <Select
+                  value={resultForm.subject}
+                  onValueChange={(value) => {
+                    const index = subjectOptions.indexOf(value);
+                    setSubjectIndex(index >= 0 ? index : 0);
+                    loadDraftForSubject(value);
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select subject" /></SelectTrigger>
+                  <SelectContent>
+                    {subjectOptions.map((subject) => (
+                      <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>CBC Grade</Label>
+                <Select value={resultForm.grade} onValueChange={(value) => setResultForm({ ...resultForm, grade: value })}>
+                  <SelectTrigger><SelectValue placeholder="Select CBC grade" /></SelectTrigger>
+                  <SelectContent>
+                    {CBC_GRADE_OPTIONS.map((grade) => (
+                      <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="rounded-lg border border-[#1E293B] bg-[#0F172A] p-3 text-sm text-slate-300">
+              Saved subjects: {assessmentDrafts.length} / {subjectOptions.length}
+            </div>
             <Textarea placeholder="Teacher comments" value={resultForm.teacher_comments} onChange={(e) => setResultForm({ ...resultForm, teacher_comments: e.target.value })} />
             <div className="space-y-2">
               <Label>Upload Exam / Assessment Report</Label>
               <Input type="file" accept="image/*,.pdf" onChange={(e) => handleReportUpload(e.target.files?.[0])} />
               {resultForm.report_url && <p className="text-xs text-emerald-400">Report uploaded and will await admin approval</p>}
             </div>
-            <Button type="submit" className="w-full">Submit Result</Button>
+            <div className="sticky bottom-0 bg-background pt-3 grid md:grid-cols-2 gap-3">
+              <Button type="button" variant="outline" onClick={saveAndNextSubject}>
+                Save & Next Subject
+              </Button>
+              <Button type="submit">Submit & Download Report</Button>
+            </div>
           </form>
         </DialogContent>
       </Dialog>
@@ -483,7 +622,7 @@ const TeacherPortal = () => {
             <Tabs defaultValue="overview">
               <TabsList className="flex flex-wrap h-auto">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="guardians">Guardians</TabsTrigger>
+                <TabsTrigger value="guardians">Parent/Guardians</TabsTrigger>
                 <TabsTrigger value="medical">Medical</TabsTrigger>
                 <TabsTrigger value="results">Results</TabsTrigger>
                 <TabsTrigger value="history">History</TabsTrigger>
@@ -495,7 +634,7 @@ const TeacherPortal = () => {
                 <div className="space-y-2 mt-4">
                   {studentResults.length === 0 ? <p className="text-slate-400">No results found</p> : studentResults.map((result) => (
                     <div key={result.id} className="bg-[#0F172A] border border-[#1E293B] rounded-lg p-3">
-                      <p className="text-white font-medium">{result.subject}: {result.marks} ({result.grade})</p>
+                      <p className="text-white font-medium">{result.subject}: {result.grade || result.marks}</p>
                       <p className="text-slate-400 text-sm">{result.teacher_comments || "No comments"}</p>
                     </div>
                   ))}
@@ -524,13 +663,20 @@ function pick(obj, keys) {
   return keys.reduce((acc, key) => ({ ...acc, [key]: obj?.[key] ?? "" }), {});
 }
 
+function formatProfileLabel(key) {
+  return key
+    .replace(/^secondary_guardian_/, "parent/guardian 2 ")
+    .replace(/^guardian_/, "parent/guardian 1 ")
+    .replaceAll("_", " ");
+}
+
 function TeacherProfileTab({ value, data }) {
   return (
     <TabsContent value={value}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
         {Object.entries(data).map(([key, val]) => (
           <div key={key} className="bg-[#0F172A] border border-[#1E293B] rounded-lg p-3">
-            <p className="text-xs text-slate-400 capitalize">{key.replaceAll("_", " ")}</p>
+            <p className="text-xs text-slate-400 capitalize">{formatProfileLabel(key)}</p>
             <p className="text-white break-words">{String(val || "-")}</p>
           </div>
         ))}

@@ -3684,11 +3684,20 @@ async def join_school(payload: dict, http_request: Request):
         linked_student = None
         if role == "parent":
             if not child_name or not child_admission_number:
-                raise HTTPException(status_code=400, detail="Child name and admission number are required for Parent/Guardian")
+                raise HTTPException(status_code=400, detail="Child name and admission number or student access code are required for Parent/Guardian")
             linked_student = await db.students.find_one({
                 "school_id": school_id,
-                "admission_number": child_admission_number,
+                "approval_status": "approved",
+                "$or": [
+                    {"admission_number": child_admission_number},
+                    {"student_access_code": child_admission_number.strip().upper()},
+                ],
             })
+            if linked_student:
+                admission_number = linked_student.get("admission_number")
+                student_access_code = linked_student.get("student_access_code")
+            else:
+                raise HTTPException(status_code=404, detail="No approved student matches that admission number or student access code")
 
         selected_classes = []
 
@@ -4158,27 +4167,7 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         await log_security_event("password_reset_requested_unknown", metadata={"email": email, "school_code": school_code})
         return {"success": True, "message": "If the account exists, a verification code has been sent."}
 
-    if normalize_role(user.get("role")) in STAFF_ROLES:
-        request_id = str(uuid.uuid4())
-        await db.staff_password_reset_requests.insert_one({
-            "id": request_id,
-            "user_id": user.get("id"),
-            "school_id": user.get("school_id"),
-            "email": email,
-            "school_code": school_code,
-            "status": "pending",
-            "created_at": now_utc(),
-            "updated_at": now_utc(),
-        })
-        await log_security_event("staff_password_reset_requested", user, {"request_id": request_id})
-        return {
-            "success": True,
-            "message": "Your password reset request has been sent to the school administrator.",
-        }
-
     phone = str(user.get("phone") or user.get("phone_number") or "").strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="No phone number is registered for this account")
 
     code = generate_verification_code()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -4198,13 +4187,17 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         "updated_at": now_iso(),
     })
     await log_security_event("password_reset_code_created", user, {"expires_at": expires_at.isoformat()})
-    masked_phone = f"{phone[:3]}***{phone[-3:]}" if len(phone) > 6 else "***"
-    return {
+    response = {
         "success": True,
-        "message": "Verification code sent to the registered phone number.",
-        "sent_to_phone": masked_phone,
+        "message": "Verification code generated for this account.",
         "expires_in_minutes": 15,
     }
+    if phone:
+        response["message"] = "Verification code sent to the registered phone number."
+        response["sent_to_phone"] = f"{phone[:3]}***{phone[-3:]}" if len(phone) > 6 else "***"
+    if get_settings().app_env not in {"production", "prod"}:
+        response["reset_code"] = code
+    return response
 
 
 @api_router.post("/auth/reset-password")
@@ -4247,8 +4240,6 @@ async def reset_password_with_code(request: VerifyResetCodeRequest, http_request
         {"id": user.get("id")},
         {"$set": {
             "password_hash": hash_password(request.new_password),
-            "approval_status": "pending",
-            "is_active": False,
             "updated_at": now_iso(),
         }}
     )
@@ -4256,8 +4247,8 @@ async def reset_password_with_code(request: VerifyResetCodeRequest, http_request
         {"id": reset_record.get("id")},
         {"$set": {"used": True, "updated_at": now_iso()}}
     )
-    await log_security_event("password_reset_completed", user, {"requires_admin_approval": True})
-    return {"success": True, "message": "Password reset. Admin approval is required before access is restored."}
+    await log_security_event("password_reset_completed", user)
+    return {"success": True, "message": "Password reset. You can now sign in with the new password."}
 
 # =========================================
 # SCHOOL INVITE + UNIQUE LINKS
@@ -4621,7 +4612,7 @@ async def create_student(
         # =========================
         role = normalize_role(current_user.get("role"))
 
-        allowed_roles = ["school_admin", "secretary", "teacher"]
+        allowed_roles = ["school_admin", "secretary"]
 
         if role not in allowed_roles:
             raise HTTPException(
@@ -4639,7 +4630,10 @@ async def create_student(
         # =========================
         # DUPLICATE CHECK
         # =========================
-        admission_number = request.admission_number or await generate_admission_number(school_id)
+        admission_number = str(request.admission_number or "").strip() or await generate_admission_number(school_id)
+        gender = str(request.gender or "").strip().lower() or None
+        if gender and gender not in {"male", "female"}:
+            raise HTTPException(status_code=400, detail="Gender must be Male or Female")
 
         existing_student = await db.students.find_one({
             "school_id": school_id,
@@ -4672,7 +4666,7 @@ async def create_student(
                 if request.date_of_birth
                 else None
             ),
-            "gender": request.gender,
+            "gender": gender,
             "birth_certificate_no": request.birth_certificate_no,
             "nationality": request.nationality,
             "religion": request.religion,
@@ -9096,6 +9090,7 @@ async def ensure_database_indexes():
         (db.users, [("school_id", 1), ("role", 1), ("status", 1)], {"name": "users_school_role_status_idx"}),
         (db.users, [("school_id", 1), ("approval_status", 1), ("role", 1)], {"name": "users_school_approval_role_idx"}),
         (db.students, [("school_id", 1), ("admission_number", 1)], {"name": "students_school_admission_idx"}),
+        (db.students, [("school_id", 1), ("student_access_code", 1)], {"name": "students_school_access_code_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
         (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),
         (db.students, [("school_id", 1), ("guardian_email", 1)], {"name": "students_school_guardian_email_idx", "sparse": True}),

@@ -265,9 +265,9 @@ const StudentPortal = () => {
       }
 
       doc.text(
-        `${r?.subject || "-"}: ${safeNum(r?.marks)}/${safeNum(
-          r?.max_marks
-        )} - ${r?.grade || "-"}`,
+        r?.result_type === "assessment"
+          ? `${r?.subject || "-"}: ${r?.grade || "-"}`
+          : `${r?.subject || "-"}: ${safeNum(r?.marks)}/${safeNum(r?.max_marks)} - ${r?.grade || "-"}`,
         20,
         y
       );
@@ -469,7 +469,7 @@ const StudentPortal = () => {
                   <TableRow>
                     <TableHead>Subject</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Marks</TableHead>
+                    <TableHead>Score / CBC Level</TableHead>
                     <TableHead>Grade</TableHead>
                     <TableHead>Download</TableHead>
                   </TableRow>
@@ -481,7 +481,7 @@ const StudentPortal = () => {
                       <TableCell>{r?.subject || "-"}</TableCell>
                       <TableCell>{r?.result_type || "exam"}</TableCell>
                       <TableCell>
-                        {safeNum(r?.marks)}/{safeNum(r?.max_marks)}
+                        {r?.result_type === "assessment" ? (r?.grade || "-") : `${safeNum(r?.marks)}/${safeNum(r?.max_marks)}`}
                       </TableCell>
                       <TableCell>
                         <Badge className={gradeColor(r?.grade)}>

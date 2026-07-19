@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 
 import jsPDF from "jspdf";
+import { ALL_CBC_CLASSES } from "@/utils/schoolClasses";
 
 // ======================
 // DEFAULT FORM
@@ -72,23 +73,6 @@ const ExamsPage = () => {
   // ======================
   // OPTIONS
   // ======================
-  const kenyaClasses = [
-    "PP1",
-    "PP2",
-    "Grade 1",
-    "Grade 2",
-    "Grade 3",
-    "Grade 4",
-    "Grade 5",
-    "Grade 6",
-    "Grade 7",
-    "Grade 8",
-    "Grade 9",
-    "Grade 10",
-    "Grade 11",
-    "Grade 12",
-  ];
-
   const collegeYears = [
     "Year 1",
     "Year 2",
@@ -367,7 +351,7 @@ Date: ${exam?.exam_date || "-"}
                       </SelectTrigger>
 
                       <SelectContent>
-                        {kenyaClasses.map((item) => (
+                        {ALL_CBC_CLASSES.map((item) => (
                           <SelectItem
                             key={item}
                             value={item}

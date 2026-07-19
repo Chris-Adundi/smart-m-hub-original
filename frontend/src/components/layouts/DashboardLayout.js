@@ -83,7 +83,7 @@ const MENU_ITEMS = [
     icon: Users,
     label: "Students",
     path: "/app/students",
-    roles: ["school_admin", "secretary", "teacher", "finance"],
+    roles: ["school_admin", "secretary"],
   },
   {
     icon: UsersRound,

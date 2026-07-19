@@ -325,19 +325,19 @@ const SchoolProfilePage = () => {
           <div className="grid md:grid-cols-2 gap-4">
 
             {formData.vision && (
-              <Card className="bg-blue-50">
+              <Card className="bg-blue-50 text-slate-900">
                 <CardContent className="p-5">
-                  <h3 className="font-bold mb-2">Vision</h3>
-                  <p>{formData.vision}</p>
+                  <h3 className="font-bold mb-2 text-slate-950">Vision</h3>
+                  <p className="text-slate-800">{formData.vision}</p>
                 </CardContent>
               </Card>
             )}
 
             {formData.mission && (
-              <Card className="bg-green-50">
+              <Card className="bg-green-50 text-slate-900">
                 <CardContent className="p-5">
-                  <h3 className="font-bold mb-2">Mission</h3>
-                  <p>{formData.mission}</p>
+                  <h3 className="font-bold mb-2 text-slate-950">Mission</h3>
+                  <p className="text-slate-800">{formData.mission}</p>
                 </CardContent>
               </Card>
             )}

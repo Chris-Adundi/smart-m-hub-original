@@ -50,7 +50,7 @@ export const getDefaultRouteByRole = (role) => getRoleRoute(role);
 export const routePermissions = {
   school_profile: ["super_admin", "school_admin"],
   dashboard: ["super_admin", "school_admin", "teacher", "finance", "secretary", "supporting_staff"],
-  students: ["super_admin", "school_admin", "secretary", "teacher", "finance"],
+  students: ["super_admin", "school_admin", "secretary"],
   staff: ["super_admin", "school_admin"],
   fees: ["super_admin", "school_admin", "finance"],
   attendance: ["super_admin", "school_admin", "teacher", "secretary"],

@@ -18,11 +18,19 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
+import { ALL_CBC_CLASSES, classLevelsForSchool } from "@/utils/schoolClasses";
 
 const SecretaryPortal = () => {
   const [students, setStudents] = useState([]);
@@ -31,6 +39,7 @@ const SecretaryPortal = () => {
 
   const [studentDialogOpen, setStudentDialogOpen] = useState(false);
   const [announcementDialogOpen, setAnnouncementDialogOpen] = useState(false);
+  const [schoolProfile, setSchoolProfile] = useState(() => authService.getUser()?.school_branding || {});
 
   const user = authService.getUser();
 
@@ -94,17 +103,21 @@ const SecretaryPortal = () => {
     try {
       setLoading(true);
 
-      const [studentsRes, announcementsRes] = await Promise.all([
+      const [studentsRes, announcementsRes, schoolRes] = await Promise.all([
         apiClient
           .get("/students?approval_status=all")
           .catch(() => ({ data: [] })),
         apiClient
           .get("/announcements?approval_status=all")
           .catch(() => ({ data: [] })),
+        apiClient
+          .get("/school/profile")
+          .catch(() => ({ data: null })),
       ]);
 
       setStudents(normalizeArray(studentsRes?.data, "students"));
       setAnnouncements(normalizeArray(announcementsRes?.data, "announcements"));
+      setSchoolProfile(schoolRes?.data?.data || authService.getUser()?.school_branding || {});
     } catch (err) {
       toast.error("Failed to load portal data");
       setStudents([]);
@@ -273,7 +286,10 @@ const SecretaryPortal = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <Label>Admission Number</Label>
-                        <Input value="Generated automatically if left blank" readOnly />
+                        <Input
+                          value={studentForm.admission_number}
+                          onChange={(e) => updateStudentField("admission_number", e.target.value)}
+                        />
                       </div>
                       <div>
                         <Label>Passport Photo</Label>
@@ -282,31 +298,28 @@ const SecretaryPortal = () => {
                       </div>
                       {[
                         ["full_name", "Full Name"],
-                        ["gender", "Gender"],
                         ["date_of_birth", "Date of Birth", "date"],
                         ["birth_certificate_no", "Birth Certificate No."],
                         ["nationality", "Nationality"],
                         ["religion", "Religion"],
-                        ["class_name", "Class"],
                         ["stream", "Stream"],
                         ["year_of_study", "Boarding/Day"],
-                        ["guardian_name", "Guardian 1 Name"],
-                        ["guardian_relationship", "Guardian 1 Relationship"],
-                        ["guardian_phone", "Guardian 1 Phone"],
-                        ["guardian_email", "Guardian 1 Email", "email"],
-                        ["guardian_occupation", "Guardian 1 Occupation"],
-                        ["guardian_national_id", "Guardian 1 National ID"],
-                        ["guardian_address", "Guardian 1 Address"],
-                        ["secondary_guardian_name", "Guardian 2 Name"],
-                        ["secondary_guardian_relationship", "Guardian 2 Relationship"],
-                        ["secondary_guardian_phone", "Guardian 2 Phone"],
-                        ["secondary_guardian_email", "Guardian 2 Email", "email"],
-                        ["secondary_guardian_occupation", "Guardian 2 Occupation"],
-                        ["secondary_guardian_national_id", "Guardian 2 National ID"],
-                        ["secondary_guardian_address", "Guardian 2 Address"],
+                        ["guardian_name", "Parent/Guardian 1 Name"],
+                        ["guardian_relationship", "Parent/Guardian 1 Relationship"],
+                        ["guardian_phone", "Parent/Guardian 1 Phone"],
+                        ["guardian_email", "Parent/Guardian 1 Email", "email"],
+                        ["guardian_occupation", "Parent/Guardian 1 Occupation"],
+                        ["guardian_national_id", "Parent/Guardian 1 National ID"],
+                        ["guardian_address", "Parent/Guardian 1 Address"],
+                        ["secondary_guardian_name", "Parent/Guardian 2 Name"],
+                        ["secondary_guardian_relationship", "Parent/Guardian 2 Relationship"],
+                        ["secondary_guardian_phone", "Parent/Guardian 2 Phone"],
+                        ["secondary_guardian_email", "Parent/Guardian 2 Email", "email"],
+                        ["secondary_guardian_occupation", "Parent/Guardian 2 Occupation"],
+                        ["secondary_guardian_national_id", "Parent/Guardian 2 National ID"],
+                        ["secondary_guardian_address", "Parent/Guardian 2 Address"],
                         ["previous_school", "Previous School"],
                         ["transfer_reason", "Reason for Transfer"],
-                        ["last_class", "Last Class"],
                       ].map(([field, label, type]) => (
                         <div key={field}>
                           <Label>{label}</Label>
@@ -318,6 +331,43 @@ const SecretaryPortal = () => {
                           />
                         </div>
                       ))}
+                      <div>
+                        <Label>Gender</Label>
+                        <Select value={studentForm.gender} onValueChange={(value) => updateStudentField("gender", value)}>
+                          <SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="male">Male</SelectItem>
+                            <SelectItem value="female">Female</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Class</Label>
+                        <Select value={studentForm.class_name} onValueChange={(value) => updateStudentField("class_name", value)}>
+                          <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                          <SelectContent>
+                            {classLevelsForSchool(schoolProfile).map((level) => (
+                              <div key={level.label}>
+                                <div className="px-2 py-1 text-xs font-semibold text-slate-500">{level.label}</div>
+                                {level.classes.map((className) => (
+                                  <SelectItem key={className} value={className}>{className}</SelectItem>
+                                ))}
+                              </div>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Last Class</Label>
+                        <Select value={studentForm.last_class} onValueChange={(value) => updateStudentField("last_class", value)}>
+                          <SelectTrigger><SelectValue placeholder="Select last class" /></SelectTrigger>
+                          <SelectContent>
+                            {ALL_CBC_CLASSES.map((className) => (
+                              <SelectItem key={className} value={className}>{className}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="md:col-span-2">
                         <Label>Special Needs</Label>
                         <Textarea value={studentForm.special_needs} onChange={(e) => updateStudentField("special_needs", e.target.value)} />

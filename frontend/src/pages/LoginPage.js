@@ -561,12 +561,13 @@ const selectedRoleData = roles.find(
   const handleRequestReset = async (event) => {
     event.preventDefault();
     try {
-      await apiClient.post("/auth/forgot-password", {
+      const response = await apiClient.post("/auth/forgot-password", {
         email: resetForm.email.trim().toLowerCase(),
         school_code: resetForm.school_code.trim().toUpperCase() || null,
       });
       setResetCodeSent(true);
-      toast.success("Verification code sent to the registered phone number");
+      const devCode = response?.data?.reset_code;
+      toast.success(devCode ? `Verification code: ${devCode}` : "Verification code sent if the account details are valid");
     } catch (error) {
       toast.error(formatApiError(error, "Failed to request reset code"));
     }
@@ -581,7 +582,7 @@ const selectedRoleData = roles.find(
         code: resetForm.code.trim(),
         new_password: resetForm.new_password,
       });
-      toast.success("Password reset. Admin approval is required before login.");
+      toast.success("Password reset. You can now sign in with the new password.");
       setResetMode(false);
       setResetCodeSent(false);
       setResetForm({ email: "", school_code: "", code: "", new_password: "" });
@@ -734,7 +735,7 @@ const selectedRoleData = roles.find(
                   </>
                 )}
                 <Button type="submit" className="w-full">
-                  {resetCodeSent ? "Reset Password" : "Send Verification Code"}
+                  {resetCodeSent ? "Change Password" : "Send Verification Code"}
                 </Button>
                 <button
                   type="button"
@@ -795,27 +796,24 @@ const selectedRoleData = roles.find(
               </div>
 
               {selectedRole === "student" && (
-                <div className="grid gap-3">
-                  <div>
-                    <Label className="text-slate-300 mb-2 block">
-                      Student Access Code
-                    </Label>
-                    <Input
-                      placeholder="STU-XXXXXXXX"
-                      value={formData.student_access_code}
-                      onChange={(e) => updateField("student_access_code", e.target.value.toUpperCase())}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-slate-300 mb-2 block">
-                      Admission Number
-                    </Label>
-                    <Input
-                      placeholder="Alternative to access code"
-                      value={formData.admission_number}
-                      onChange={(e) => updateField("admission_number", e.target.value)}
-                    />
-                  </div>
+                <div>
+                  <Label className="text-slate-300 mb-2 block">
+                    Admission Number or Student Access Code
+                  </Label>
+                  <Input
+                    placeholder="ADM-00001 or STU-XXXXXXXX"
+                    value={formData.student_access_code || formData.admission_number}
+                    onChange={(e) => {
+                      const value = e.target.value.trim();
+                      if (value.toUpperCase().startsWith("STU-")) {
+                        updateField("student_access_code", value.toUpperCase());
+                        updateField("admission_number", "");
+                      } else {
+                        updateField("admission_number", value);
+                        updateField("student_access_code", "");
+                      }
+                    }}
+                  />
                 </div>
               )}
 
