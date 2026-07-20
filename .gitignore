@@ -4,3 +4,17 @@ node_modules/
 *.pyc
 .env
 backend/uploads/
+
+# Frontend production builds
+frontend/build/
+super-admin-dashboard/build/
+
+# Test and cache folders
+.pytest_cache/
+pytest-cache-files-*/
+pytest-platform-fix/
+
+# Editor and operating-system files
+.vscode/
+.DS_Store
+Thumbs.db
