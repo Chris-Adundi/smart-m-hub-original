@@ -70,6 +70,7 @@ const initialForm = {
   transfer_reason: "",
   last_class: "",
   documents_attached: [],
+  other_document: "",
 };
 
 const textFields = [
@@ -164,9 +165,13 @@ const StudentsPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const { other_document, ...cleanFormData } = formData;
       const payload = {
-        ...formData,
+        ...cleanFormData,
         admission_number: formData.admission_number || null,
+        documents_attached: (formData.documents_attached || []).map((item) =>
+          item === "Other" ? other_document : item
+        ).filter(Boolean),
       };
       await apiClient.post("/students", payload);
       toast.success("Student admission submitted");
@@ -318,6 +323,14 @@ const StudentsPage = () => {
                     </label>
                   ))}
                 </div>
+                {(formData.documents_attached || []).includes("Other") && (
+                  <Input
+                    className="mt-3"
+                    placeholder="Type document name"
+                    value={formData.other_document || ""}
+                    onChange={(e) => updateField("other_document", e.target.value)}
+                  />
+                )}
               </section>
 
               <Button type="submit" className="w-full">Submit Admission</Button>

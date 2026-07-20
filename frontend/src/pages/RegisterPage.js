@@ -33,6 +33,7 @@ const initialForm = {
   admin_email: "",
   admin_phone: "",
   school_type: "",
+  custom_school_type: "",
   school_classification: "",
   admin_password: "",
 };
@@ -70,6 +71,10 @@ const RegisterPage = () => {
         return false;
       }
     }
+    if (formData.school_type === "other" && !formData.custom_school_type.trim()) {
+      toast.error("Please specify the level of school");
+      return false;
+    }
 
     return true;
   };
@@ -86,7 +91,7 @@ const RegisterPage = () => {
         email: formData.email.trim().toLowerCase(),
         address: formData.address.trim(),
         phone: formData.phone.trim(),
-        school_type: formData.school_type,
+        school_type: formData.school_type === "other" ? formData.custom_school_type.trim() : formData.school_type,
         school_classification: formData.school_classification,
         operation_type: "day",
         admin_name: formData.admin_name.trim(),
@@ -273,7 +278,10 @@ const RegisterPage = () => {
 
                 <div className="space-y-2">
                   <Label>Level of School</Label>
-                  <Select value={formData.school_type} onValueChange={(value) => updateField("school_type", value)}>
+                  <Select value={formData.school_type} onValueChange={(value) => {
+                    updateField("school_type", value);
+                    updateField("custom_school_type", "");
+                  }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select level" />
                     </SelectTrigger>
@@ -286,6 +294,14 @@ const RegisterPage = () => {
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formData.school_type === "other" && (
+                    <Input
+                      placeholder="Type level of school"
+                      value={formData.custom_school_type || ""}
+                      onChange={(e) => updateField("custom_school_type", e.target.value)}
+                      required
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-2">

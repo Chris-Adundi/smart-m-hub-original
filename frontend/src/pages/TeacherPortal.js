@@ -107,6 +107,7 @@ const TeacherPortal = () => {
     exam_id: "",
     student_id: "",
     subject: "",
+    custom_subject: "",
     grade: "",
     teacher_comments: "",
     report_url: "",
@@ -185,7 +186,9 @@ const TeacherPortal = () => {
   );
 
   const mergeCurrentDraft = () => {
-    const subject = String(resultForm.subject || subjectOptions[subjectIndex] || "").trim();
+    const subject = String(
+      resultForm.subject === "other" ? resultForm.custom_subject : resultForm.subject || subjectOptions[subjectIndex] || ""
+    ).trim();
     if (!resultForm.exam_id || !resultForm.student_id || !subject || !resultForm.grade) {
       toast.error("Select student, exam, subject and CBC grade");
       return null;
@@ -214,6 +217,7 @@ const TeacherPortal = () => {
     setResultForm((prev) => ({
       ...prev,
       subject,
+      custom_subject: "",
       grade: existing?.grade || "",
       teacher_comments: existing?.teacher_comments || "",
       report_url: existing?.report_url || prev.report_url || "",
@@ -288,6 +292,7 @@ const TeacherPortal = () => {
         exam_id: "",
         student_id: "",
         subject: "",
+        custom_subject: "",
         grade: "",
         teacher_comments: "",
         report_url: "",
@@ -309,6 +314,7 @@ const TeacherPortal = () => {
       ...prev,
       student_id: student?.id || "",
       subject: classSubjects[0] || "",
+      custom_subject: "",
       grade: "",
       teacher_comments: "",
       result_type: "assessment",
@@ -508,6 +514,7 @@ const TeacherPortal = () => {
                     ...resultForm,
                     student_id: value,
                     subject: subjects[0] || "",
+                    custom_subject: "",
                     grade: "",
                     teacher_comments: "",
                     result_type: "assessment",
@@ -549,8 +556,17 @@ const TeacherPortal = () => {
                     {subjectOptions.map((subject) => (
                       <SelectItem key={subject} value={subject}>{subject}</SelectItem>
                     ))}
+                    <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
+                {resultForm.subject === "other" && (
+                  <Input
+                    placeholder="Type subject / learning area"
+                    value={resultForm.custom_subject || ""}
+                    onChange={(e) => setResultForm({ ...resultForm, custom_subject: e.target.value })}
+                    required
+                  />
+                )}
               </div>
               <div className="space-y-2">
                 <Label>CBC Grade</Label>

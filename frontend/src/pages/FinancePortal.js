@@ -71,6 +71,7 @@ const FinancePortal = () => {
   const [txnForm, setTxnForm] = useState({
     transaction_type: "income",
     category: "",
+    custom_category: "",
     amount: "",
     description: "",
     date: new Date().toISOString().split("T")[0],
@@ -169,8 +170,10 @@ const FinancePortal = () => {
     e.preventDefault();
 
     try {
+      const { custom_category, ...cleanTxnForm } = txnForm;
       await apiClient.post("/finance/transactions", {
-        ...txnForm,
+        ...cleanTxnForm,
+        category: txnForm.category === "other" ? custom_category : txnForm.category,
         amount: Number(txnForm.amount || 0),
       });
 
@@ -180,6 +183,7 @@ const FinancePortal = () => {
       setTxnForm({
         transaction_type: "income",
         category: "",
+        custom_category: "",
         amount: "",
         description: "",
         date: new Date().toISOString().split("T")[0],
@@ -388,6 +392,7 @@ const FinancePortal = () => {
                       ...txnForm,
                       transaction_type: v,
                       category: "",
+                      custom_category: "",
                     })
                   }
                 >
@@ -408,7 +413,7 @@ const FinancePortal = () => {
 
                 <Select
                   value={txnForm.category}
-                  onValueChange={(v) => setTxnForm({ ...txnForm, category: v })}
+                  onValueChange={(v) => setTxnForm({ ...txnForm, category: v, custom_category: "" })}
                 >
                   <SelectTrigger id="category" name="category">
                     <SelectValue placeholder="Select category" />
@@ -419,12 +424,20 @@ const FinancePortal = () => {
                       ? incomeCategories
                       : expenditureCategories
                     ).map((c) => (
-                      <SelectItem key={c} value={c}>
+                      <SelectItem key={c} value={c.toLowerCase().startsWith("other") ? "other" : c}>
                         {c}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {txnForm.category === "other" && (
+                  <Input
+                    placeholder="Type category"
+                    value={txnForm.custom_category || ""}
+                    onChange={(e) => setTxnForm({ ...txnForm, custom_category: e.target.value })}
+                    required
+                  />
+                )}
               </div>
 
               {/* AMOUNT */}

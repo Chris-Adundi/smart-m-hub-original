@@ -37,6 +37,7 @@ const initialPayment = {
   student_id: "",
   amount: "",
   payment_type: "fees",
+  custom_payment_type: "",
   payment_method: "mpesa",
   term: "",
   academic_year: thisYear,
@@ -139,8 +140,10 @@ const FeesPage = () => {
   const submitPayment = async (event) => {
     event.preventDefault();
     try {
+      const { custom_payment_type, ...cleanPaymentForm } = paymentForm;
       await apiClient.post("/payments/initiate", {
-        ...paymentForm,
+        ...cleanPaymentForm,
+        payment_type: paymentForm.payment_type === "other" ? custom_payment_type : paymentForm.payment_type,
         amount: Number(paymentForm.amount || 0),
         total_amount_due: paymentForm.total_amount_due ? Number(paymentForm.total_amount_due) : null,
         outstanding_balance: paymentForm.outstanding_balance ? Number(paymentForm.outstanding_balance) : null,
@@ -255,7 +258,7 @@ const FeesPage = () => {
                 </div>
                 <div className="space-y-2">
                   <Label>Payment Item</Label>
-                  <Select value={paymentForm.payment_type} onValueChange={(value) => setPaymentForm({ ...paymentForm, payment_type: value })}>
+                  <Select value={paymentForm.payment_type} onValueChange={(value) => setPaymentForm({ ...paymentForm, payment_type: value, custom_payment_type: "" })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fees">School Fees</SelectItem>
@@ -264,6 +267,14 @@ const FeesPage = () => {
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                  {paymentForm.payment_type === "other" && (
+                    <Input
+                      placeholder="Type payment item"
+                      value={paymentForm.custom_payment_type || ""}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, custom_payment_type: e.target.value })}
+                      required
+                    />
+                  )}
                 </div>
               </div>
 

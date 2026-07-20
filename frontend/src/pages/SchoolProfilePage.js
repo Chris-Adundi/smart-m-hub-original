@@ -27,6 +27,7 @@ const SchoolProfilePage = () => {
     phone: "",
     email: "",
     school_type: "",
+    custom_school_type: "",
     school_classification: "",
     operation_type: "day",
     school_code: "",
@@ -82,6 +83,7 @@ const SchoolProfilePage = () => {
           phone: data.phone || "",
           email: data.email || "",
           school_type: data.school_type || "",
+          custom_school_type: "",
           school_classification: data.school_classification || "",
           operation_type: data.operation_type || "day",
           school_code: data.school_code || "",
@@ -167,7 +169,10 @@ const SchoolProfilePage = () => {
       // UPDATE SCHOOL
       // =========================
       const clean = Object.fromEntries(
-        Object.entries(formData || {}).filter(([_, v]) => v !== "")
+        Object.entries({
+          ...formData,
+          school_type: formData.school_type === "other" ? formData.custom_school_type : formData.school_type,
+        } || {}).filter(([key, v]) => key !== "custom_school_type" && v !== "")
       );
 
       await apiClient.patch("/school/profile", clean);
@@ -435,7 +440,7 @@ const SchoolProfilePage = () => {
                 <select
                   className="h-10 rounded-md border bg-transparent px-3"
                   value={formData.school_type}
-                  onChange={(e) => setFormData({ ...formData, school_type: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, school_type: e.target.value, custom_school_type: "" })}
                 >
                   <option value="">School type</option>
                   <option value="primary">Primary</option>
@@ -446,6 +451,13 @@ const SchoolProfilePage = () => {
                   <option value="university">University</option>
                   <option value="other">Other</option>
                 </select>
+                {formData.school_type === "other" && (
+                  <Input
+                    placeholder="Type school type"
+                    value={formData.custom_school_type || ""}
+                    onChange={(e) => setFormData({ ...formData, custom_school_type: e.target.value })}
+                  />
+                )}
                 <select
                   className="h-10 rounded-md border bg-transparent px-3"
                   value={formData.school_classification}

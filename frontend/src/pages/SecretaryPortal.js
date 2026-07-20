@@ -79,6 +79,7 @@ const SecretaryPortal = () => {
     transfer_reason: "",
     last_class: "",
     documents_attached: [],
+    other_document: "",
   };
 
   const [studentForm, setStudentForm] = useState(initialStudentForm);
@@ -143,7 +144,13 @@ const SecretaryPortal = () => {
     e.preventDefault();
 
     try {
-      await apiClient.post("/students", studentForm);
+      const { other_document, ...cleanStudentForm } = studentForm;
+      await apiClient.post("/students", {
+        ...cleanStudentForm,
+        documents_attached: (studentForm.documents_attached || []).map((item) =>
+          item === "Other" ? other_document : item
+        ).filter(Boolean),
+      });
 
       toast.success("Student submitted for approval");
 
@@ -401,6 +408,14 @@ const SecretaryPortal = () => {
                           </label>
                         ))}
                       </div>
+                      {(studentForm.documents_attached || []).includes("Other") && (
+                        <Input
+                          className="mt-3"
+                          placeholder="Type document name"
+                          value={studentForm.other_document || ""}
+                          onChange={(e) => updateStudentField("other_document", e.target.value)}
+                        />
+                      )}
                     </div>
 
                     <Button type="submit" className="w-full">

@@ -36,6 +36,7 @@ const emptyForm = {
   full_name: "",
   national_id: "",
   gender: "",
+  custom_gender: "",
   date_of_birth: "",
   phone: "",
   email: "",
@@ -46,6 +47,7 @@ const emptyForm = {
   department: "",
   position: "",
   designation: "",
+  custom_designation: "",
   role: "teacher",
   account_status: "active",
   password: "",
@@ -160,6 +162,7 @@ const StaffPage = () => {
       full_name: member.full_name || "",
       national_id: member.national_id || "",
       gender: member.gender || "",
+      custom_gender: "",
       date_of_birth: member.date_of_birth ? String(member.date_of_birth).slice(0, 10) : "",
       phone: member.phone || "",
       email: member.email || "",
@@ -170,6 +173,7 @@ const StaffPage = () => {
       department: member.department || "",
       position: member.position || "",
       designation: member.designation || "",
+      custom_designation: "",
       role: member.role || "teacher",
       account_status: staffStatus(member),
       salary: member.salary || "",
@@ -204,8 +208,12 @@ const StaffPage = () => {
     try {
       const payload = {
         ...formData,
+        gender: formData.gender === "other" ? formData.custom_gender : formData.gender,
+        designation: formData.designation === "Other Staff" ? formData.custom_designation : formData.designation,
         salary: formData.salary === "" ? null : Number(formData.salary),
       };
+      delete payload.custom_gender;
+      delete payload.custom_designation;
       if (editingStaff) {
         if (!payload.password) {
           delete payload.password;
@@ -295,7 +303,10 @@ const StaffPage = () => {
                 <Field label="National ID / Passport" value={formData.national_id} onChange={(value) => updateField("national_id", value)} />
                 <div className="space-y-2">
                   <Label>Gender</Label>
-                  <Select value={formData.gender} onValueChange={(value) => updateField("gender", value)}>
+                  <Select value={formData.gender} onValueChange={(value) => {
+                    updateField("gender", value);
+                    updateField("custom_gender", "");
+                  }}>
                     <SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="male">Male</SelectItem>
@@ -303,6 +314,13 @@ const StaffPage = () => {
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formData.gender === "other" && (
+                    <Input
+                      placeholder="Type gender"
+                      value={formData.custom_gender || ""}
+                      onChange={(event) => updateField("custom_gender", event.target.value)}
+                    />
+                  )}
                 </div>
                 <Field label="Date of Birth" type="date" value={formData.date_of_birth} onChange={(value) => updateField("date_of_birth", value)} />
                 <Field label="Phone Number" value={formData.phone} onChange={(value) => updateField("phone", value)} required />
@@ -322,12 +340,22 @@ const StaffPage = () => {
                 <Field label="Position" value={formData.position} onChange={(value) => updateField("position", value)} required />
                 <div className="space-y-2">
                   <Label>Designation</Label>
-                  <Select value={formData.designation} onValueChange={(value) => updateField("designation", value)}>
+                  <Select value={formData.designation} onValueChange={(value) => {
+                    updateField("designation", value);
+                    updateField("custom_designation", "");
+                  }}>
                     <SelectTrigger><SelectValue placeholder="Select designation" /></SelectTrigger>
                     <SelectContent>
                       {designationOptions.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {formData.designation === "Other Staff" && (
+                    <Input
+                      placeholder="Type designation"
+                      value={formData.custom_designation || ""}
+                      onChange={(event) => updateField("custom_designation", event.target.value)}
+                    />
+                  )}
                 </div>
                 <Field label="Employment Date" type="date" value={formData.joined_date} onChange={(value) => updateField("joined_date", value)} />
                 <Field label="Salary" type="number" value={formData.salary} onChange={(value) => updateField("salary", value)} />
