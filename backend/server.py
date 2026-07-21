@@ -161,27 +161,53 @@ settings = get_settings()
 # =====================================================
 app = FastAPI()
 
+
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "service": "Smart M Hub API"
+    }
+
+
 UPLOAD_ROOT = ROOT_DIR / "uploads"
 UPLOAD_ROOT.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
+
 
 def parse_allowed_origin_regex():
     configured = os.getenv("ALLOWED_ORIGIN_REGEX") or os.getenv("CORS_ORIGIN_REGEX")
     if configured:
         return configured
-    if str(os.getenv("ALLOW_CLOUDFLARE_TUNNEL", "")).lower() in {"1", "true", "yes"}:
+
+    if str(os.getenv("ALLOW_CLOUDFLARE_TUNNEL", "")).lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
         return r"https://.*\.trycloudflare\.com"
+
     return None
 
 
 def parse_allowed_origins(allowed_origin_regex: Optional[str] = None):
     configured = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS")
+
     if configured:
-        return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+        return [
+            origin.strip().rstrip("/")
+            for origin in configured.split(",")
+            if origin.strip()
+        ]
+
     if APP_ENV in {"production", "prod"}:
         if allowed_origin_regex:
             return []
-        raise RuntimeError("ALLOWED_ORIGINS or CORS_ORIGINS must be set in production")
+
+        raise RuntimeError(
+            "ALLOWED_ORIGINS or CORS_ORIGINS must be set in production"
+        )
+
     return [
         "http://localhost:5173",
         "http://localhost:3000",
@@ -200,7 +226,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
