@@ -19,10 +19,11 @@ import secrets
 from dotenv import load_dotenv
 from pathlib import Path
 from config import load_secret_file_env, validate_environment
+from single_super_admin import is_canonical_super_admin
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-load_secret_file_env(["SECRET_KEY", "MONGO_URL"])
+load_secret_file_env(["SECRET_KEY", "MONGO_URL", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD"])
 validate_environment()
 
 DB_NAME = os.getenv("DB_NAME", "smart_m_hub")
@@ -358,6 +359,9 @@ async def get_current_user(
     # ROLE VALIDATION
     # =========================
     db_role = normalize_role(user.get("role"))
+
+    if db_role == "super_admin" and not is_canonical_super_admin(user):
+        raise HTTPException(status_code=403, detail="Developer account disabled")
 
     if db_role != token_role:
         raise HTTPException(

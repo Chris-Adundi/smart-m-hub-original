@@ -3,8 +3,15 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#000000" />
-        <meta name="description" content="Smart Hub - School Management System" />
+        <meta name="theme-color" content="#0f172a" />
+        <meta name="application-name" content="Smart M Hub" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Smart M Hub" />
+        <meta name="description" content="Smart M Hub - Smart school management, simplified" />
+        <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+        <link rel="icon" href="%PUBLIC_URL%/icons/smart-m-hub-192.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" sizes="192x192" href="%PUBLIC_URL%/icons/smart-m-hub-192.png" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
@@ -21,9 +28,19 @@
         work correctly both with client-side routing and a non-root public URL.
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
-        <title>Smart Hub | School Management System</title>
+        <title>Smart M Hub | School Management System</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
         <style>
+            #app-cover { display: none; }
+            @media (display-mode: standalone) {
+                #app-cover { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif; transition: opacity 220ms ease; }
+                #app-cover.cover-hidden { opacity: 0; pointer-events: none; }
+                #app-cover img { width: 88px; height: 88px; border-radius: 22px; }
+                #app-cover h1 { margin: 22px 0 5px; font-size: 28px; }
+                #app-cover p { margin: 0; color: #94a3b8; font-size: 14px; }
+                .cover-loader { width: 28px; height: 28px; margin-top: 28px; border: 3px solid rgba(148,163,184,.25); border-top-color: #10b981; border-radius: 50%; animation: cover-spin .8s linear infinite; }
+            }
+            @keyframes cover-spin { to { transform: rotate(360deg); } }
             /* Hide all Emergent branding */
             #emergent-badge,
             .emergent-badge,
@@ -40,7 +57,16 @@
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
+        <div id="app-cover" aria-label="Smart M Hub is loading">
+          <img src="%PUBLIC_URL%/icons/smart-m-hub-192.svg" alt="" />
+          <h1>Smart M Hub</h1>
+          <p>Smart School Management, Simplified</p>
+          <span class="cover-loader" aria-hidden="true"></span>
+        </div>
         <div id="root"></div>
+        <script>
+          (function(){var cover=document.getElementById("app-cover");var standalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;if(!standalone){cover.remove();return}window.addEventListener("smart-m-hub:ready",function(){window.setTimeout(function(){cover.classList.add("cover-hidden");window.setTimeout(function(){cover.remove()},250)},450)},{once:true});window.setTimeout(function(){if(cover.isConnected){cover.classList.add("cover-hidden");window.setTimeout(function(){cover.remove()},250)}},2200)})();
+        </script>
         <!--
       This HTML file is a template.
       If you open it directly in the browser, you will see an empty page.

@@ -100,6 +100,7 @@ from services.report_artifacts import create_report_artifact_manifest
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
 from config import load_secret_file_env, validate_environment
+from single_super_admin import is_canonical_super_admin, reconcile_single_super_admin
 from app.core.responses import api_success as shared_api_success
 from app.core.responses import error_code_for_status as shared_error_code_for_status
 from app.core.router_extraction import move_routes
@@ -127,7 +128,7 @@ from observability import (
 # =====================================================
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-load_secret_file_env(["SECRET_KEY", "MONGO_URL", "OPENAI_API_KEY", "STRIPE_API_KEY"])
+load_secret_file_env(["SECRET_KEY", "MONGO_URL", "OPENAI_API_KEY", "STRIPE_API_KEY", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD"])
 validate_environment()
 configure_logging()
 
@@ -3888,6 +3889,11 @@ async def login(request: LoginRequest, http_request: Request):
             await record_login_failure(email, school_code, "invalid_role")
             await log_security_event("login_blocked", user, {"reason": "invalid_role"})
             raise HTTPException(status_code=403, detail="Invalid login details")
+
+        if db_role == "super_admin" and not is_canonical_super_admin(user):
+            await record_login_failure(email, school_code, "developer_account_disabled")
+            await log_security_event("login_blocked", user, {"reason": "developer_account_disabled"})
+            raise HTTPException(status_code=403, detail="Developer account disabled")
 
         approval_status = (user.get("approval_status") or "pending").lower()
 
@@ -9198,6 +9204,7 @@ async def ensure_database_indexes():
 
 @app.on_event("startup")
 async def startup_tasks():
+    await reconcile_single_super_admin(db, hash_password)
     await ensure_database_indexes()
 
 

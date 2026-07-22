@@ -44,6 +44,8 @@ def validate_environment() -> None:
         require_env("DB_NAME", errors)
         secret_key = require_env("SECRET_KEY", errors)
         require_env("FRONTEND_URL", errors)
+        require_env("SUPER_ADMIN_EMAIL", errors)
+        require_env("SUPER_ADMIN_PASSWORD", errors)
         if not (os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS") or os.getenv("ALLOWED_ORIGIN_REGEX") or os.getenv("CORS_ORIGIN_REGEX")):
             errors.append("ALLOWED_ORIGINS/CORS_ORIGINS or ALLOWED_ORIGIN_REGEX/CORS_ORIGIN_REGEX is required")
         if secret_key and len(secret_key) < 32:

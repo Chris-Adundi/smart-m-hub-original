@@ -1,0 +1,61 @@
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from single_super_admin import (
+    canonical_super_admin_email,
+    is_canonical_super_admin,
+    is_elevated_role,
+    reconcile_single_super_admin,
+)
+
+
+SUPER_ADMIN_EMAIL = "configured-admin@example.com"
+
+
+def test_only_configured_elevated_identity_is_canonical():
+    with patch.dict(os.environ, {"SUPER_ADMIN_EMAIL": f"  {SUPER_ADMIN_EMAIL.upper()}  "}):
+        assert canonical_super_admin_email() == SUPER_ADMIN_EMAIL
+        assert is_canonical_super_admin({"email": SUPER_ADMIN_EMAIL, "role": "platform_admin"})
+        assert not is_canonical_super_admin({"email": "other@example.com", "role": "super_admin"})
+        assert not is_canonical_super_admin({"email": SUPER_ADMIN_EMAIL, "role": "school_admin"})
+
+
+def test_super_admin_email_is_required():
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(RuntimeError, match="SUPER_ADMIN_EMAIL is required"):
+            canonical_super_admin_email()
+
+
+def test_all_elevated_aliases_are_recognized_without_affecting_school_roles():
+    for role in ["developer", "platform-admin", "platform_admin", "superadmin", "super_admin"]:
+        assert is_elevated_role(role)
+    for role in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
+        assert not is_elevated_role(role)
+
+
+def test_reconcile_creates_one_hashed_active_super_admin():
+    import asyncio
+
+    users = MagicMock()
+    users.update_many = AsyncMock()
+    users.find.return_value.to_list = AsyncMock(return_value=[])
+    users.insert_one = AsyncMock()
+    users.create_index = AsyncMock()
+    database = MagicMock(users=users)
+    hash_password = MagicMock(return_value="$2b$12$secure-hash")
+
+    with patch.dict(os.environ, {"SUPER_ADMIN_EMAIL": SUPER_ADMIN_EMAIL, "SUPER_ADMIN_PASSWORD": "temporary-secret"}):
+        result = asyncio.run(reconcile_single_super_admin(database, hash_password))
+
+    assert result["email"] == SUPER_ADMIN_EMAIL
+    hash_password.assert_called_once_with("temporary-secret")
+    inserted = users.insert_one.await_args.args[0]
+    assert inserted["password_hash"] == "$2b$12$secure-hash"
+    assert inserted["is_active"] is True
+    assert inserted["is_suspended"] is False
+    assert inserted["approval_status"] == "approved"
+    assert inserted["role"] == "super_admin"
+    assert "temporary-secret" not in str(inserted)
+    users.create_index.assert_awaited_once()

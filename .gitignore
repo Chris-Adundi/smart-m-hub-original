@@ -18,3 +18,4 @@ pytest-platform-fix/
 .vscode/
 .DS_Store
 Thumbs.db
+backups/

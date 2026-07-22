@@ -26,6 +26,7 @@ import {
   Building2,
   LifeBuoy,
   ClipboardCheck,
+  Download,
 } from "lucide-react";
 
 // =========================
@@ -334,6 +335,15 @@ const DashboardLayout = () => {
             <p className="text-white text-sm">{user.full_name}</p>
             <p className="text-xs text-slate-500">{user.email}</p>
           </div>
+
+          <Button
+            variant="ghost"
+            onClick={() => window.dispatchEvent(new Event("smart-m-hub:install"))}
+            className="w-full justify-start"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Install Smart M Hub
+          </Button>
 
           <Button
             variant="ghost"
