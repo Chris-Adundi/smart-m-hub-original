@@ -10,6 +10,7 @@ import { authService, apiClient, formatApiError } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import InstallSmartMHub from "@/components/InstallSmartMHub";
 
 import { toast } from "sonner";
 
@@ -878,6 +879,7 @@ const selectedRoleData = roles.find(
               </Button>
 
               {selectedRole === "student" && (
+                <div className="space-y-4">
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-center">
                   <p className="text-sm text-slate-300">
                     Parent or guardian access needed?
@@ -886,8 +888,10 @@ const selectedRoleData = roles.find(
                     to={`/join-school${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`}
                     className="mt-2 inline-flex text-sm font-semibold text-emerald-300 hover:text-emerald-200"
                   >
-                    Request parent/guardian access
+                    Sign Up
                   </Link>
+                </div>
+                <InstallSmartMHub />
                 </div>
               )}
 

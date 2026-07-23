@@ -1103,6 +1103,19 @@ class LoginRequest(BaseModel):
         return str(value or "").strip().lower()
 
 
+class ParentRegistrationRequest(BaseModel):
+    school_code: str
+    student_access_code: str
+    email: EmailStr
+    password: str
+    confirm_password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_parent_email(cls, value):
+        return str(value or "").strip().lower()
+
+
 class CreateStudentRequest(BaseModel):
 
     admission_number: Optional[str] = None
@@ -3628,6 +3641,102 @@ async def submit_registration_payment_phone(payload: RegistrationPaymentPhoneReq
     }
 
 
+def guardian_email_matches(student: dict, email: str) -> bool:
+    normalized = str(email or "").strip().lower()
+    guardian_emails = {
+        str(student.get("guardian_email") or "").strip().lower(),
+        str(student.get("secondary_guardian_email") or "").strip().lower(),
+    }
+    guardian_emails.discard("")
+    return normalized in guardian_emails
+
+
+@api_router.post("/auth/register-parent")
+async def register_parent(request: ParentRegistrationRequest, http_request: Request):
+    school_code = request.school_code.strip().upper()
+    student_access_code = request.student_access_code.strip().upper()
+    email = str(request.email).strip().lower()
+
+    await enforce_rate_limit(
+        "register_parent",
+        request_fingerprint(http_request, email, school_code, student_access_code),
+    )
+    if not school_code or not student_access_code:
+        raise HTTPException(status_code=400, detail="School code and student access code are required")
+    if request.password != request.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    validate_password_strength(request.password)
+
+    school = await db.schools.find_one({"school_code": school_code})
+    if not school:
+        raise HTTPException(status_code=404, detail="Invalid school code")
+    if school.get("is_active") is False or str(school.get("status") or "").lower() in {"inactive", "suspended"}:
+        raise HTTPException(status_code=403, detail="School is inactive")
+
+    school_id = str(school.get("id") or "")
+    if not school_id:
+        raise HTTPException(status_code=500, detail="School record missing ID")
+
+    student = await db.students.find_one({
+        "school_id": school_id,
+        "student_access_code": student_access_code,
+        "approval_status": "approved",
+    })
+    if not student:
+        raise HTTPException(status_code=404, detail="Invalid student access code for this school")
+    if not guardian_email_matches(student, email):
+        await log_security_event(
+            "parent_registration_rejected",
+            metadata={"school_id": school_id, "reason": "guardian_email_mismatch"},
+        )
+        raise HTTPException(status_code=403, detail="Email does not match a guardian recorded for this student")
+
+    existing = await db.users.find_one({
+        "school_id": school_id,
+        "email": {"$regex": f"^{re.escape(email)}$", "$options": "i"},
+    })
+    if existing:
+        raise HTTPException(status_code=409, detail="An account already exists for this email. Please sign in.")
+
+    is_primary = email == str(student.get("guardian_email") or "").strip().lower()
+    full_name = (
+        student.get("guardian_name") if is_primary else student.get("secondary_guardian_name")
+    ) or "Parent/Guardian"
+    now = now_utc()
+    user = {
+        "id": str(uuid.uuid4()),
+        "school_id": school_id,
+        "school_name": school.get("name"),
+        "school_fingerprint": school.get("fingerprint"),
+        "email": email,
+        "full_name": full_name,
+        "password_hash": hash_password(request.password),
+        "role": "parent",
+        "status": "active",
+        "approval_status": "approved",
+        "is_active": True,
+        "is_suspended": False,
+        "is_blocked": False,
+        "student_id": student.get("id"),
+        "student_ids": [student.get("id")],
+        "admission_number": student.get("admission_number"),
+        "student_access_code": student.get("student_access_code"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.users.insert_one(user)
+    await log_security_event(
+        "parent_registration_completed",
+        user,
+        {"school_id": school_id, "student_id": student.get("id")},
+    )
+    return {
+        "success": True,
+        "message": "Account created successfully. You can now sign in.",
+        "user": {"email": email, "role": "parent", "school_id": school_id},
+    }
+
+
 @api_router.post("/auth/join-school")
 async def join_school(payload: dict, http_request: Request):
 
@@ -3651,6 +3760,12 @@ async def join_school(payload: dict, http_request: Request):
 
         role = normalize_role(raw_role).lower()
         await enforce_rate_limit("join_school", request_fingerprint(http_request, email, school_code, invite_code, role))
+
+        if role == "parent":
+            raise HTTPException(
+                status_code=400,
+                detail="Parents and guardians must use Parent/Guardian Sign Up with a school code and student access code",
+            )
 
         # =========================
         # VALIDATION

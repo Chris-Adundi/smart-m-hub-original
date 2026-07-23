@@ -1,211 +1,87 @@
 import { useState } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { GraduationCap } from "lucide-react";
 import { apiClient } from "@/App";
-
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
+import InstallSmartMHub from "@/components/InstallSmartMHub";
 import { toast } from "sonner";
-import { GraduationCap } from "lucide-react";
 
-const JoinSchoolPage = () => {
+export default function ParentSignUpPage() {
   const navigate = useNavigate();
-  const { inviteCode } = useParams();
   const location = useLocation();
-
-  const queryCode = new URLSearchParams(location.search).get("code");
-  const initialCode = inviteCode || queryCode || "";
-
+  const initialSchoolCode = new URLSearchParams(location.search).get("school") || "";
   const [loading, setLoading] = useState(false);
-
-  const [formData, setFormData] = useState({
-    invite_code: initialCode,
-    full_name: "",
-    role: "",
+  const [form, setForm] = useState({
+    school_code: initialSchoolCode,
+    student_access_code: "",
     email: "",
     password: "",
-    admission_number: "",
-    student_access_code: "",
+    confirm_password: "",
   });
 
-  const updateField = (field, value) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
-  const requiresAdmissionNumber =
-    formData.role === "student" || formData.role === "parent";
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!formData.invite_code.trim()) return toast.error("Invite code is required");
-    if (!formData.full_name.trim()) return toast.error("Full name is required");
-    if (!formData.role) return toast.error("Please select a role");
-    if (!formData.email.trim()) return toast.error("Email is required");
-    if (!formData.password) return toast.error("Password is required");
-
-    if (
-      requiresAdmissionNumber &&
-      !formData.admission_number.trim() &&
-      !formData.student_access_code.trim()
-    ) {
-      return toast.error("Admission number or student access code is required");
+  const submit = async (event) => {
+    event.preventDefault();
+    if (form.password !== form.confirm_password) {
+      toast.error("Passwords do not match");
+      return;
     }
-
     setLoading(true);
-
     try {
-      const payload = {
-        invite_code: formData.invite_code.trim(),
-        full_name: formData.full_name.trim(),
-        role: formData.role.toLowerCase(),
-        email: formData.email.trim().toLowerCase(),
-        password: formData.password,
-        admission_number: formData.admission_number?.trim() || null,
-        student_access_code: formData.student_access_code?.trim().toUpperCase() || null,
-      };
-
-      const response = await apiClient.post("/auth/join-school", payload);
-
-      toast.success(
-        response?.data?.message ||
-          "Account created successfully. Awaiting approval."
-      );
-
-      navigate("/login");
+      const { data } = await apiClient.post("/auth/register-parent", {
+        school_code: form.school_code.trim().toUpperCase(),
+        student_access_code: form.student_access_code.trim().toUpperCase(),
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+        confirm_password: form.confirm_password,
+      });
+      toast.success(data?.message || "Account created. You can now sign in.");
+      navigate(`/login?school=${encodeURIComponent(form.school_code.trim().toUpperCase())}`);
     } catch (error) {
-      toast.error(
-        error?.response?.data?.detail ||
-          error?.response?.data?.message ||
-          "Failed to join school"
-      );
+      toast.error(error?.response?.data?.detail || error?.message || "Unable to create account");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center p-6">
-      <Card className="w-full max-w-lg bg-[#1A2332] border-[#1E3A4F]/40">
-
-        <CardHeader className="text-center space-y-4">
-          <div className="mx-auto w-16 h-16 bg-emerald-600 rounded-xl flex items-center justify-center">
-            <GraduationCap className="w-10 h-10 text-white" />
-          </div>
-
-          <CardTitle className="text-3xl font-bold text-white">
-            Join School
-          </CardTitle>
-
-          <CardDescription className="text-slate-400 mt-2">
-            Create your account using the school invite code
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-
-            <div>
-              <Label>Invite Code</Label>
-              <Input
-                value={formData.invite_code}
-                onChange={(e) => updateField("invite_code", e.target.value)}
-              />
+    <div className="min-h-screen bg-[#0B1120] p-6 text-white">
+      <div className="mx-auto grid max-w-5xl gap-6 py-8 lg:grid-cols-[1fr_360px]">
+        <Card className="bg-[#1A2332] border-[#1E3A4F]/40">
+          <CardHeader className="text-center space-y-4">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-emerald-600">
+              <GraduationCap className="h-10 w-10 text-white" />
             </div>
-
-            <div>
-              <Label>Full Name</Label>
-              <Input
-                value={formData.full_name}
-                onChange={(e) => updateField("full_name", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label>Role</Label>
-              <Select
-                value={formData.role}
-                onValueChange={(value) => updateField("role", value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="parent">Parent</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={formData.email}
-                onChange={(e) => updateField("email", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label>Password</Label>
-              <Input
-                type="password"
-                value={formData.password}
-                onChange={(e) => updateField("password", e.target.value)}
-              />
-            </div>
-
-            {requiresAdmissionNumber && (
-              <div className="grid gap-4">
-                <div>
-                  <Label>Student Access Code</Label>
-                  <Input
-                    value={formData.student_access_code}
-                    onChange={(e) =>
-                      updateField("student_access_code", e.target.value.toUpperCase())
-                    }
-                    placeholder="STU-XXXXXXXX"
-                  />
-                </div>
-                <div>
-                  <Label>Admission Number</Label>
-                  <Input
-                    value={formData.admission_number}
-                    onChange={(e) =>
-                      updateField("admission_number", e.target.value)
-                    }
-                    placeholder="Alternative to access code"
-                  />
-                </div>
+            <CardTitle className="text-3xl font-bold text-white">Parent/Guardian Sign Up</CardTitle>
+            <CardDescription className="text-slate-400">
+              Use the school code and student access code provided by your school administrator.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submit} className="space-y-5">
+              <div><Label>School Code</Label><Input required value={form.school_code} onChange={(e) => update("school_code", e.target.value.toUpperCase())} /></div>
+              <div><Label>Student Access Code</Label><Input required value={form.student_access_code} onChange={(e) => update("student_access_code", e.target.value.toUpperCase())} placeholder="STU-XXXXXXXX" /></div>
+              <div><Label>Parent/Guardian Email</Label><Input required type="email" value={form.email} onChange={(e) => update("email", e.target.value)} /></div>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div><Label>Password</Label><Input required type="password" value={form.password} onChange={(e) => update("password", e.target.value)} /></div>
+                <div><Label>Confirm Password</Label><Input required type="password" value={form.confirm_password} onChange={(e) => update("confirm_password", e.target.value)} /></div>
               </div>
-            )}
-
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Creating Account..." : "Join School"}
-            </Button>
-
-          </form>
-        </CardContent>
-
-      </Card>
+              <p className="text-sm leading-6 text-slate-400">
+                Registration succeeds only when this email is already recorded as Guardian 1 or Guardian 2 for the student.
+              </p>
+              <Button type="submit" className="w-full" disabled={loading}>{loading ? "Creating Account..." : "Sign Up"}</Button>
+              <div className="text-center text-sm text-slate-300">
+                Already registered? <Link className="font-semibold text-emerald-300 hover:text-emerald-200" to={`/login${form.school_code ? `?school=${encodeURIComponent(form.school_code.trim().toUpperCase())}` : ""}`}>Sign In</Link>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+        <InstallSmartMHub />
+      </div>
     </div>
   );
-};
-
-export default JoinSchoolPage;
+}

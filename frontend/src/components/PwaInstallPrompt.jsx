@@ -24,8 +24,9 @@ export default function PwaInstallPrompt() {
       setOpen(true);
       return;
     }
-    if (installEvent) setOpen(true);
-  }, [installEvent]);
+    setShowIosHelp(false);
+    setOpen(true);
+  }, []);
 
   useEffect(() => {
     const captureInstall = (event) => {
@@ -90,12 +91,13 @@ export default function PwaInstallPrompt() {
         <div className="min-w-0 flex-1">
           <h2 id="pwa-install-title" className="font-semibold text-white">Install Smart M Hub</h2>
           {showIosHelp ? (
-            <p className="mt-1 text-sm leading-6 text-slate-400">In Safari, tap the Share button, then choose <strong className="text-slate-200">Add to Home Screen</strong>.</p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">Tap <strong className="text-slate-200">Share</strong>, then <strong className="text-slate-200">Add to Home Screen</strong>.</p>
           ) : (
-            <p className="mt-1 text-sm leading-6 text-slate-400">Add Smart M Hub to your device for faster and easier access.</p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">Install Smart M Hub on your phone or computer for easier access. Once installed, you can open it directly from your device without searching for the Smart M Hub link every time.</p>
           )}
           <div className="mt-4 flex gap-3">
-            {!showIosHelp && <button type="button" onClick={install} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Install App</button>}
+            {!showIosHelp && installEvent && <button type="button" onClick={install} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Install Smart M Hub</button>}
+            {!showIosHelp && !installEvent && <p className="text-xs leading-5 text-slate-400">Use your browser menu and choose Install app or Add to Home Screen when available.</p>}
             <button type="button" onClick={dismiss} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5">{showIosHelp ? "Got It" : "Not Now"}</button>
           </div>
         </div>

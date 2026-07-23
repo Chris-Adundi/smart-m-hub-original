@@ -4,6 +4,7 @@ import { getAuthToken, isSuperAdmin } from "./auth/superAdminAuth";
 
 import MainLayout from "./layouts/MainLayout";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import PwaInstall from "./components/PwaInstall";
 
 const DashboardHome = lazy(() => import("./pages/DashboardHome"));
 const Schools = lazy(() => import("./pages/Schools"));
@@ -28,6 +29,7 @@ function RequireSuperAdmin({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <PwaInstall />
       <RouteErrorBoundary>
       <Suspense fallback={<div style={{ padding: 24, color: "#4b5563" }}>Loading...</div>}>
       <Routes>

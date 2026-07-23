@@ -21,6 +21,7 @@ const SchoolProfilePage = lazy(() => import("@/pages/SchoolProfilePage"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
 const JoinSchoolPage = lazy(() => import("@/pages/JoinSchoolPage"));
+const ParentSignUpPage = lazy(() => import("@/pages/RegisterSchoolPage"));
 
 // ======================
 // LAYOUT
@@ -336,6 +337,7 @@ function App() {
           {/* OPTIONAL DIRECT PAGES */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/parent-sign-up" element={<ParentSignUpPage />} />
 
           {/* SCHOOL SETUP */}
           <Route
@@ -346,7 +348,7 @@ function App() {
           {/* JOIN SCHOOL */}
           <Route
             path="/join-school"
-            element={<JoinSchoolPage />}
+            element={<ParentSignUpPage />}
           />
 
           <Route
