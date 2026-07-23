@@ -21,7 +21,7 @@ import copy
 import time
 
 from pathlib import Path
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -1096,6 +1096,11 @@ class LoginRequest(BaseModel):
     admission_number: Optional[str] = None
     student_access_code: Optional[str] = None
     mfa_code: Optional[str] = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email_input(cls, value):
+        return str(value or "").strip().lower()
 
 
 class CreateStudentRequest(BaseModel):
@@ -3840,7 +3845,7 @@ async def login(request: LoginRequest, http_request: Request):
 
         await assert_login_not_locked(email, school_code)
 
-        user_query = {"email": email}
+        user_query = {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
         login_school = None
 
         if school_code:
@@ -3871,6 +3876,11 @@ async def login(request: LoginRequest, http_request: Request):
                 )
 
         if not user:
+            logger.warning(
+                "login_rejected reason=user_not_found database=%s collection=users school_code_supplied=%s",
+                db_name,
+                bool(school_code),
+            )
             await record_login_failure(email, school_code, "user_not_found")
             await log_security_event("login_failed", metadata={"email": email, "school_code": school_code, "reason": "user_not_found"})
             raise HTTPException(status_code=401, detail="Invalid login details")
@@ -3880,24 +3890,33 @@ async def login(request: LoginRequest, http_request: Request):
         stored_hash = user.get("password_hash") or user.get("hashed_password")
 
         if not stored_hash or not verify_password(password, stored_hash):
+            logger.warning(
+                "login_rejected reason=%s database=%s collection=users account_id=%s",
+                "password_hash_missing" if not stored_hash else "invalid_password",
+                db_name,
+                user_id,
+            )
             await record_login_failure(email, school_code, "invalid_password")
             await log_security_event("login_failed", user, {"email": email, "school_code": school_code, "reason": "invalid_password"})
             raise HTTPException(status_code=401, detail="Invalid login details")
 
         db_role = normalize_role(user.get("role") or "")
         if not db_role:
+            logger.warning("login_rejected reason=invalid_role database=%s collection=users account_id=%s", db_name, user_id)
             await record_login_failure(email, school_code, "invalid_role")
             await log_security_event("login_blocked", user, {"reason": "invalid_role"})
             raise HTTPException(status_code=403, detail="Invalid login details")
 
         if db_role == "super_admin" and not is_canonical_super_admin(user):
+            logger.warning("login_rejected reason=noncanonical_super_admin database=%s collection=users account_id=%s", db_name, user_id)
             await record_login_failure(email, school_code, "developer_account_disabled")
             await log_security_event("login_blocked", user, {"reason": "developer_account_disabled"})
             raise HTTPException(status_code=403, detail="Developer account disabled")
 
         approval_status = (user.get("approval_status") or "pending").lower()
 
-        if approval_status == "deactivated" or str(user.get("status") or "").lower() == "deactivated" or user.get("is_suspended") is True:
+        if approval_status == "deactivated" or str(user.get("status") or "").lower() == "deactivated" or user.get("is_suspended") is True or user.get("is_blocked") is True:
+            logger.warning("login_rejected reason=account_deactivated_suspended_or_blocked database=%s collection=users account_id=%s", db_name, user_id)
             await record_login_failure(email, school_code, "account_deactivated")
             await log_security_event("login_blocked", user, {"reason": "account_deactivated"})
             raise HTTPException(status_code=403, detail="Your account has been deactivated.")
@@ -9204,7 +9223,27 @@ async def ensure_database_indexes():
 
 @app.on_event("startup")
 async def startup_tasks():
-    await reconcile_single_super_admin(db, hash_password)
+    logger.warning("startup_super_admin_reconciliation_invoked database=%s collection=users", db_name)
+    result = await reconcile_single_super_admin(db, hash_password)
+    reconciled = await db.users.find_one({"super_admin_guard": "singleton"})
+    stored_hash = (reconciled or {}).get("password_hash") or (reconciled or {}).get("hashed_password")
+    configured_password = os.getenv("SUPER_ADMIN_PASSWORD") or ""
+    hash_matches = bool(stored_hash and configured_password and verify_password(configured_password, stored_hash))
+    logger.warning(
+        "startup_super_admin_reconciliation_verified action=%s database=%s collection=users record_found=%s password_hash_matches_configured=%s role=%s status=%s approval_status=%s active=%s suspended=%s blocked=%s",
+        result.get("action"),
+        db_name,
+        bool(reconciled),
+        hash_matches,
+        (reconciled or {}).get("role"),
+        (reconciled or {}).get("status"),
+        (reconciled or {}).get("approval_status"),
+        (reconciled or {}).get("is_active"),
+        (reconciled or {}).get("is_suspended"),
+        (reconciled or {}).get("is_blocked"),
+    )
+    if not reconciled or not hash_matches:
+        raise RuntimeError("Super Admin reconciliation verification failed")
     await ensure_database_indexes()
 
 

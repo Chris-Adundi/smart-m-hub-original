@@ -2,6 +2,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from passlib.context import CryptContext
 
 from single_super_admin import (
     canonical_super_admin_email,
@@ -10,8 +11,20 @@ from single_super_admin import (
     reconcile_single_super_admin,
 )
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(password):
+    return pwd_context.hash(password)
+
+
+def verify_password(password, password_hash):
+    return pwd_context.verify(password, password_hash)
+
 
 SUPER_ADMIN_EMAIL = "configured-admin@example.com"
+DEPLOYED_SUPER_ADMIN_EMAIL = "chrisadundi1@gmail.com"
+DEPLOYED_SUPER_ADMIN_PASSWORD = "C30758255c"
 
 
 def test_only_configured_elevated_identity_is_canonical():
@@ -61,3 +74,34 @@ def test_reconcile_creates_one_hashed_active_super_admin():
     legacy_cleanup = users.update_many.await_args_list[0].args[1]
     assert legacy_cleanup["$unset"] == {"super_admin_guard": ""}
     users.create_index.assert_awaited_once()
+
+
+def test_exact_deployed_super_admin_credentials_authenticate_after_reconciliation():
+    import asyncio
+
+    users = MagicMock()
+    users.name = "users"
+    users.update_many = AsyncMock()
+    users.find.return_value.to_list = AsyncMock(return_value=[])
+    users.insert_one = AsyncMock()
+    users.create_index = AsyncMock()
+    database = MagicMock(users=users)
+    database.name = "smart_m_hub_beta"
+
+    with patch.dict(os.environ, {
+        "SUPER_ADMIN_EMAIL": f"  {DEPLOYED_SUPER_ADMIN_EMAIL.upper()}  ",
+        "SUPER_ADMIN_PASSWORD": DEPLOYED_SUPER_ADMIN_PASSWORD,
+    }):
+        result = asyncio.run(reconcile_single_super_admin(database, hash_password))
+
+    inserted = users.insert_one.await_args.args[0]
+    assert result["email"] == DEPLOYED_SUPER_ADMIN_EMAIL
+    assert verify_password(DEPLOYED_SUPER_ADMIN_PASSWORD, inserted["password_hash"])
+    assert inserted["role"] == "super_admin"
+    assert inserted["status"] == "active"
+    assert inserted["approval_status"] == "approved"
+    assert inserted["is_active"] is True
+    assert inserted["is_suspended"] is False
+    assert inserted["is_blocked"] is False
+    assert inserted["school_id"] is None
+    assert DEPLOYED_SUPER_ADMIN_PASSWORD not in str(inserted)

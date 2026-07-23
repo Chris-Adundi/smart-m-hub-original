@@ -3,8 +3,12 @@ from __future__ import annotations
 import os
 import re
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 ELEVATED_ROLE_ALIASES = {
@@ -41,6 +45,15 @@ async def reconcile_single_super_admin(db, hash_password: Callable[[str], str]) 
     email = canonical_super_admin_email()
     password = os.getenv("SUPER_ADMIN_PASSWORD")
     now = datetime.now(timezone.utc)
+    database_name = getattr(db, "name", None) or "unknown"
+    collection_name = getattr(getattr(db, "users", None), "name", None) or "users"
+    logger.warning(
+        "super_admin_reconciliation_started database=%s collection=%s email_configured=%s password_configured=%s",
+        database_name,
+        collection_name,
+        bool(email),
+        bool(password),
+    )
 
     elevated_pattern = "^(?:" + "|".join(re.escape(role) for role in sorted(ELEVATED_ROLE_ALIASES)) + ")$"
     elevated_query = {"role": {"$regex": elevated_pattern, "$options": "i"}}
@@ -89,10 +102,12 @@ async def reconcile_single_super_admin(db, hash_password: Callable[[str], str]) 
     if canonical:
         await db.users.update_one({"_id": canonical["_id"]}, {"$set": updates, "$unset": {"hashed_password": ""}})
         user_id = str(canonical.get("id") or canonical["_id"])
+        action = "updated"
     else:
         user_id = str(uuid.uuid4())
         updates.update({"id": user_id, "created_at": now})
         await db.users.insert_one(updates)
+        action = "created"
 
     await db.users.create_index(
         [("super_admin_guard", 1)],
@@ -100,4 +115,11 @@ async def reconcile_single_super_admin(db, hash_password: Callable[[str], str]) 
         partialFilterExpression={"super_admin_guard": "singleton"},
         name="single_super_admin_guard_idx",
     )
-    return {"id": user_id, "email": email}
+    logger.warning(
+        "super_admin_reconciliation_completed action=%s database=%s collection=%s account_id=%s legacy_accounts_disabled=true",
+        action,
+        database_name,
+        collection_name,
+        user_id,
+    )
+    return {"id": user_id, "email": email, "action": action}
