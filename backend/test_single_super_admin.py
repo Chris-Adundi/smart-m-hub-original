@@ -58,4 +58,6 @@ def test_reconcile_creates_one_hashed_active_super_admin():
     assert inserted["approval_status"] == "approved"
     assert inserted["role"] == "super_admin"
     assert "temporary-secret" not in str(inserted)
+    legacy_cleanup = users.update_many.await_args_list[0].args[1]
+    assert legacy_cleanup["$unset"] == {"super_admin_guard": ""}
     users.create_index.assert_awaited_once()

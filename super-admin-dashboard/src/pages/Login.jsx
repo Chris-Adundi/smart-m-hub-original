@@ -15,7 +15,7 @@ const resolveApiRoot = () => {
 const API_ROOT = resolveApiRoot();
 
 export default function Login() {
-  const [email, setEmail] = useState("developer@system.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -23,7 +23,7 @@ export default function Login() {
   const [resetMode, setResetMode] = useState(false);
   const [resetCodeSent, setResetCodeSent] = useState(false);
   const [resetForm, setResetForm] = useState({
-    email: "developer@system.com",
+    email: "",
     code: "",
     newPassword: "",
   });

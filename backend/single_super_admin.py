@@ -54,7 +54,7 @@ async def reconcile_single_super_admin(db, hash_password: Callable[[str], str]) 
     }
     await db.users.update_many(
         {"$and": [elevated_query, {"email": {"$not": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}}]},
-        {"$set": disable_fields},
+        {"$set": disable_fields, "$unset": {"super_admin_guard": ""}},
     )
 
     matches = await db.users.find({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}).to_list(length=100)
@@ -64,7 +64,7 @@ async def reconcile_single_super_admin(db, hash_password: Callable[[str], str]) 
         if duplicate_ids:
             await db.users.update_many(
                 {"_id": {"$in": duplicate_ids}},
-                {"$set": disable_fields},
+                {"$set": disable_fields, "$unset": {"super_admin_guard": ""}},
             )
 
     updates = {

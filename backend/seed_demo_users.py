@@ -90,25 +90,6 @@ for u in users:
     )
     print(f"{u['role']} demo user: {u['email']} / {u['password']}")
 
-db.users.update_one(
-    {"email": "developer@system.com"},
-    {
-        "$set": {
-            "email": "developer@system.com",
-            "full_name": "Platform Owner",
-            "password_hash": hash_password("dev123"),
-            "role": "super_admin",
-            "approval_status": "approved",
-            "is_active": True,
-            "is_suspended": False,
-            "updated_at": now,
-        },
-        "$unset": {"school_id": "", "school_name": ""},
-        "$setOnInsert": {"id": "platform-owner", "created_at": now},
-    },
-    upsert=True,
-)
-
 db.platform_invoices.update_one(
     {"school_id": demo_school_id, "invoice_type": "installation"},
     {

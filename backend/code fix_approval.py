@@ -12,8 +12,7 @@ emails = [
     "secretary@demo.com",
     "finance@demo.com",
     "teacher@demo.com",
-    "student@demo.com",
-    "developer@system.com"
+    "student@demo.com"
 ]
 
 result = db.users.update_many(
