@@ -18,6 +18,6 @@ COPY backend/ ./
 EXPOSE 10000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD-SHELL curl --fail --silent --show-error "http://127.0.0.1:${PORT:-10000}/api/health" > /dev/null
+    CMD curl --fail --silent --show-error "http://127.0.0.1:${PORT:-10000}/api/health" > /dev/null
 
 CMD ["sh", "-c", "exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-10000} --proxy-headers"]
