@@ -7,12 +7,14 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env.production
+    environment:
+      PORT: ${PORT:-10000}
     ports:
-      - "8000:8000"
+      - "${PORT:-10000}:${PORT:-10000}"
     volumes:
       - smart_m_hub_uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3).read()"]
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:$${PORT:-10000}/api/ready > /dev/null"]
       interval: 30s
       timeout: 5s
       retries: 3
