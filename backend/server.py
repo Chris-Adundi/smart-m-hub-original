@@ -95,6 +95,10 @@ from services.cache import cache
 from services.events import record_event
 from services.job_queue import enqueue_job
 from services.notifications import queue_notification_batch
+from services.external_notifications import (
+    dispatch_notifications,
+    resolve_announcement_recipients,
+)
 from services.pdf_renderer import render_simple_report_pdf
 from services.report_artifacts import create_report_artifact_manifest
 from services.storage import StorageError, store_upload
@@ -128,7 +132,11 @@ from observability import (
 # =====================================================
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-load_secret_file_env(["SECRET_KEY", "MONGO_URL", "OPENAI_API_KEY", "STRIPE_API_KEY", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD"])
+load_secret_file_env([
+    "SECRET_KEY", "MONGO_URL", "OPENAI_API_KEY", "STRIPE_API_KEY",
+    "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD", "EMAIL_API_KEY",
+    "SMTP_PASSWORD", "SMS_API_KEY",
+])
 validate_environment()
 configure_logging()
 
@@ -1248,6 +1256,7 @@ class CreateAnnouncementRequest(BaseModel):
     target_staff_user_ids: Optional[List[str]] = None
 
     priority: str = "normal"
+    notification_channels: Optional[List[str]] = None
 
 
 class RecordResultRequest(BaseModel):
@@ -3042,6 +3051,31 @@ async def approve_item(
     # FETCH UPDATED ITEM
     # =========================
     updated_item = await collection.find_one(query)
+    notification_summary = None
+    if item_type == "users":
+        notification_summary = await dispatch_notifications(
+            db,
+            school_id=str(updated_item.get("school_id") or school_id or ""),
+            title=f"School access request {action}",
+            message=f"Your request to join {updated_item.get('school_name') or 'the school'} as {updated_item.get('role') or 'staff'} was {action}.",
+            recipients=[updated_item],
+            channels=["email", "sms"],
+            event_type="join_school_request_decision",
+            requested_by=user_id,
+        )
+    elif item_type == "announcements" and action == "approved" and updated_item.get("notification_channels"):
+        recipients = await resolve_announcement_recipients(db, school_id=str(updated_item.get("school_id")), announcement=updated_item)
+        notification_summary = await dispatch_notifications(
+            db,
+            school_id=str(updated_item.get("school_id")),
+            title=updated_item.get("title") or "School announcement",
+            message=updated_item.get("content") or "",
+            recipients=recipients,
+            channels=updated_item.get("notification_channels") or [],
+            event_type="school_announcement",
+            requested_by=user_id,
+        )
+        await collection.update_one(query, {"$set": {"notification_delivery": notification_summary}})
     await log_security_event(
         "approval_action",
         current_user,
@@ -3064,6 +3098,7 @@ async def approve_item(
         "item_id": item_id,
         "approval_status": action,
         "updated_item": response_item,
+        "notification_delivery": notification_summary,
         "approved_by": user_id,
         "approval_role": role
     }
@@ -3807,6 +3842,16 @@ async def register_parent(request: ParentRegistrationRequest, http_request: Requ
         user,
         {"school_id": school_id, "student_id": student.get("id")},
     )
+    await dispatch_notifications(
+        db,
+        school_id=school_id,
+        title="Smart M Hub parent account created",
+        message=f"Your parent or guardian account for {school.get('name') or 'the school'} was created successfully. You can now sign in.",
+        recipients=[user],
+        channels=["email"],
+        event_type="parent_registration",
+        requested_by=user.get("id"),
+    )
     return {
         "success": True,
         "message": "Account created successfully. You can now sign in.",
@@ -3955,6 +4000,22 @@ async def join_school(payload: dict, http_request: Request):
                 "role": role,
                 "approval_status": "pending",
             }
+        )
+        school_admins = await db.users.find({
+            "school_id": school_id,
+            "role": "school_admin",
+            "approval_status": "approved",
+            "is_active": True,
+        }, {"_id": 0}).to_list(100)
+        await dispatch_notifications(
+            db,
+            school_id=school_id,
+            title="New Join School request",
+            message=f"{full_name} requested access as {role}. Review this request in Pending Approvals.",
+            recipients=school_admins,
+            channels=["email"],
+            event_type="join_school_request_submitted",
+            requested_by=user["id"],
         )
 
         # =========================
@@ -4391,13 +4452,23 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         "updated_at": now_iso(),
     })
     await log_security_event("password_reset_code_created", user, {"expires_at": expires_at.isoformat()})
+    delivery = await dispatch_notifications(
+        db,
+        school_id=str(user.get("school_id") or ""),
+        title="Smart M Hub password reset",
+        message=f"Your password reset verification code is {code}. It expires in 15 minutes. If you did not request this, contact your school administrator.",
+        recipients=[user],
+        channels=["email", "sms"],
+        event_type="password_reset",
+        requested_by=user.get("id"),
+    )
     response = {
         "success": True,
-        "message": "Verification code generated for this account.",
+        "message": "Verification code sent to the registered contact details." if delivery["succeeded"] else "Verification code generated, but delivery is currently unavailable. Contact your school administrator.",
         "expires_in_minutes": 15,
+        "delivery": delivery,
     }
-    if phone:
-        response["message"] = "Verification code sent to the registered phone number."
+    if phone and delivery["succeeded"]:
         response["sent_to_phone"] = f"{phone[:3]}***{phone[-3:]}" if len(phone) > 6 else "***"
     if get_settings().app_env not in {"production", "prod"}:
         response["reset_code"] = code
@@ -5545,6 +5616,24 @@ async def initiate_payment(
                 "approval_status": payment["approval_status"],
             }
         )
+        payment_recipients = []
+        if request.student_id:
+            payment_student = await db.students.find_one({"id": request.student_id, "school_id": school_id})
+            if payment_student:
+                payment_recipients = [
+                    {"id": f"{payment_student.get('id')}:guardian1", "school_id": school_id, "email": payment_student.get("guardian_email"), "phone": payment_student.get("guardian_phone")},
+                    {"id": f"{payment_student.get('id')}:guardian2", "school_id": school_id, "email": payment_student.get("secondary_guardian_email"), "phone": payment_student.get("secondary_guardian_phone")},
+                ]
+        payment_delivery = await dispatch_notifications(
+            db,
+            school_id=school_id,
+            title="School fee payment receipt",
+            message=f"Payment {payment.get('receipt_number')} for KES {payment.get('amount')} was recorded with status {payment.get('status')}.",
+            recipients=payment_recipients,
+            channels=["email"],
+            event_type="fee_payment_receipt",
+            requested_by=user_id,
+        )
 
         return {
             "success": True,
@@ -5552,7 +5641,8 @@ async def initiate_payment(
             "receipt_number": payment["receipt_number"],
             "message": "Payment recorded successfully",
             "status": payment["status"],
-            "approval_status": payment["approval_status"]
+            "approval_status": payment["approval_status"],
+            "notification_delivery": payment_delivery,
         }
 
     except HTTPException:
@@ -7191,6 +7281,12 @@ async def create_announcement(
         if target_audience not in allowed_audiences:
             raise HTTPException(status_code=400, detail="Invalid target audience")
 
+        notification_channels = list(dict.fromkeys(str(channel).lower().strip() for channel in (request.notification_channels or [])))
+        if any(channel not in {"email", "sms"} for channel in notification_channels):
+            raise HTTPException(status_code=400, detail="Notification channels must be email, SMS, or both")
+        if notification_channels and role != "school_admin":
+            raise HTTPException(status_code=403, detail="Only the School Admin can send external notifications")
+
         auto_approve = role in ["school_admin", "super_admin"]
         user_id = current_user.get("user_id")
         now = now_utc()
@@ -7205,6 +7301,7 @@ async def create_announcement(
             "target_student_ids": [str(v).strip() for v in (request.target_student_ids or []) if str(v).strip()],
             "target_staff_user_ids": [str(v).strip() for v in (request.target_staff_user_ids or []) if str(v).strip()],
             "priority": request.priority or "normal",
+            "notification_channels": notification_channels,
             "created_by": user_id,
             "submitted_by": user_id,
             "approval_status": "approved" if auto_approve else "pending",
@@ -7225,11 +7322,31 @@ async def create_announcement(
             }
         )
 
+        notification_delivery = {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0, "channels": notification_channels}
+        if auto_approve and notification_channels:
+            recipients = await resolve_announcement_recipients(db, school_id=school_id, announcement=announcement)
+            notification_delivery = await dispatch_notifications(
+                db,
+                school_id=school_id,
+                title=announcement["title"],
+                message=announcement["content"],
+                recipients=recipients,
+                channels=notification_channels,
+                event_type="school_announcement",
+                requested_by=user_id,
+            )
+            await db.announcements.update_one(
+                {"id": announcement["id"], "school_id": school_id},
+                {"$set": {"notification_delivery": notification_delivery, "updated_at": now_utc()}},
+            )
+            announcement["notification_delivery"] = notification_delivery
+
         return api_success(
             serialize_doc(announcement),
             message="Announcement submitted",
             announcement_id=announcement["id"],
-            approval_status=announcement["approval_status"]
+            approval_status=announcement["approval_status"],
+            notification_delivery=notification_delivery,
         )
 
     except HTTPException:

@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/App";
+import { authService } from "@/services/authService";
 import { toast } from "sonner";
 import { Plus, Bell, AlertTriangle, AlertCircle, Info } from "lucide-react";
 
 const AnnouncementsPage = () => {
+  const isSchoolAdmin = authService.getRole() === "school_admin";
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -23,7 +25,8 @@ const AnnouncementsPage = () => {
     target_class: "",
     target_student_ids_text: "",
     target_staff_user_ids_text: "",
-    priority: "normal"
+    priority: "normal",
+    delivery_method: "in_app"
   });
 
   useEffect(() => {
@@ -52,11 +55,13 @@ const AnnouncementsPage = () => {
     try {
       const payload = {
         ...form,
+        notification_channels: form.delivery_method === "both" ? ["email", "sms"] : form.delivery_method === "in_app" ? [] : [form.delivery_method],
         target_student_ids: splitTargets(form.target_student_ids_text),
         target_staff_user_ids: splitTargets(form.target_staff_user_ids_text),
       };
       delete payload.target_student_ids_text;
       delete payload.target_staff_user_ids_text;
+      delete payload.delivery_method;
 
       const res = await apiClient.post("/announcements", payload);
 
@@ -65,6 +70,11 @@ const AnnouncementsPage = () => {
           ? "Sent for admin approval"
           : "Announcement published"
       );
+      const delivery = res?.data?.notification_delivery || res?.data?.data?.notification_delivery;
+      if (delivery?.channels?.length) {
+        const message = `${delivery.succeeded} sent, ${delivery.failed} failed, ${delivery.skipped} skipped`;
+        delivery.failed ? toast.warning(message) : toast.success(message);
+      }
 
       setOpen(false);
       setForm({
@@ -74,7 +84,8 @@ const AnnouncementsPage = () => {
         target_class: "",
         target_student_ids_text: "",
         target_staff_user_ids_text: "",
-        priority: "normal"
+        priority: "normal",
+        delivery_method: "in_app"
       });
 
       fetchAnnouncements();
@@ -177,6 +188,22 @@ const AnnouncementsPage = () => {
                 </Select>
 
               </div>
+
+              {isSchoolAdmin && (
+                <div>
+                  <Label>Send notification using</Label>
+                  <Select value={form.delivery_method} onValueChange={(v) => setForm({ ...form, delivery_method: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in_app">In-app announcement only</SelectItem>
+                      <SelectItem value="email">Email only</SelectItem>
+                      <SelectItem value="sms">SMS only</SelectItem>
+                      <SelectItem value="both">Email and SMS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">Recipients are resolved only from this school and the selected audience.</p>
+                </div>
+              )}
 
               {form.target_audience === "class" && (
                 <div>
@@ -318,6 +345,12 @@ const AnnouncementsPage = () => {
                   }>
                     {a.approval_status}
                   </Badge>
+
+                  {a.notification_delivery?.channels?.length > 0 && (
+                    <Badge className={a.notification_delivery.failed ? "bg-red-500/10 text-red-300" : "bg-emerald-500/10 text-emerald-300"}>
+                      Delivery: {a.notification_delivery.succeeded || 0} sent, {a.notification_delivery.failed || 0} failed, {a.notification_delivery.skipped || 0} skipped
+                    </Badge>
+                  )}
 
                 </div>
 
