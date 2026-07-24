@@ -885,13 +885,20 @@ const selectedRoleData = roles.find(
                     Parent or guardian access needed?
                   </p>
                   <Link
-                    to={`/join-school${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`}
+                    to={`/parent-sign-up${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`}
                     className="mt-2 inline-flex text-sm font-semibold text-emerald-300 hover:text-emerald-200"
                   >
                     Sign Up
                   </Link>
                 </div>
                 <InstallSmartMHub />
+                </div>
+              )}
+
+              {["teacher", "finance", "secretary", "supporting_staff"].includes(selectedRole) && (
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-4 text-center">
+                  <p className="text-sm text-slate-300">New staff member joining this school?</p>
+                  <Link to={`/join-school${formData.school_code ? `?school=${encodeURIComponent(formData.school_code.trim().toUpperCase())}` : ""}`} className="mt-2 inline-flex text-sm font-semibold text-blue-300 hover:text-blue-200">Submit Join School request</Link>
                 </div>
               )}
 

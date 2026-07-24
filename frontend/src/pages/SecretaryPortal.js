@@ -30,7 +30,7 @@ import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
-import { ALL_CBC_CLASSES, classLevelsForSchool } from "@/utils/schoolClasses";
+import { classLevelsForSchool } from "@/utils/schoolClasses";
 
 const SecretaryPortal = () => {
   const [students, setStudents] = useState([]);
@@ -77,7 +77,6 @@ const SecretaryPortal = () => {
     hospital_letter_url: "",
     previous_school: "",
     transfer_reason: "",
-    last_class: "",
     documents_attached: [],
     other_document: "",
   };
@@ -360,17 +359,6 @@ const SecretaryPortal = () => {
                                   <SelectItem key={className} value={className}>{className}</SelectItem>
                                 ))}
                               </div>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>Last Class</Label>
-                        <Select value={studentForm.last_class} onValueChange={(value) => updateStudentField("last_class", value)}>
-                          <SelectTrigger><SelectValue placeholder="Select last class" /></SelectTrigger>
-                          <SelectContent>
-                            {ALL_CBC_CLASSES.map((className) => (
-                              <SelectItem key={className} value={className}>{className}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>

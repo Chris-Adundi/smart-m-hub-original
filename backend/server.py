@@ -1160,7 +1160,6 @@ class CreateStudentRequest(BaseModel):
     hospital_letter_url: Optional[str] = None
     previous_school: Optional[str] = None
     transfer_reason: Optional[str] = None
-    last_class: Optional[str] = None
     documents_attached: Optional[List[str]] = None
 
     status: Optional[str] = "active"
@@ -2701,8 +2700,13 @@ async def get_pending_items(
     ).to_list(length=100)
 
     # =========================
-    # OPERATIONS
+    # SCHOOL-SCOPED APPROVAL SOURCES
     # =========================
+    students = await db.students.find({
+        **school_filter,
+        "approval_status": "pending"
+    }).sort("created_at", -1).to_list(length=100)
+
     results = await db.results.find({
         **school_filter,
         "approval_status": "pending"
@@ -2738,6 +2742,51 @@ async def get_pending_items(
         "created_at", -1
     ).to_list(length=100)
 
+    finance_transactions = await db.finance_transactions.find({
+        **school_filter,
+        "approval_status": "pending"
+    }).sort("created_at", -1).to_list(length=100)
+
+    fee_status_requests = await db.students.find({
+        **school_filter,
+        "fee_status_approval_status": "pending"
+    }).sort("updated_at", -1).to_list(length=100)
+
+    approval_requests = await db.approval_requests.find({
+        **school_filter,
+        "status": "pending"
+    }).sort("created_at", -1).to_list(length=100)
+
+    def approval_entry(item_type: str, item: dict) -> dict:
+        item_id = str(item.get("id") or item.get("_id"))
+        details = redact_user_payload(item) if item_type == "users" else serialize_doc(item)
+        return {
+            "id": f"{item_type}:{item_id}",
+            "item_id": item_id,
+            "item_type": item_type,
+            "school_id": str(item.get("school_id") or ""),
+            "status": "pending",
+            "title": item.get("full_name") or item.get("title") or item.get("request_type") or item_type.replace("_", " ").title(),
+            "submitted_at": item.get("created_at") or item.get("updated_at"),
+            "details": details,
+        }
+
+    unified_approvals = []
+    for source_type, items in [
+        ("users", pending_users),
+        ("students", students),
+        ("results", results),
+        ("attendance", attendance),
+        ("payments", payments),
+        ("announcements", announcements),
+        ("inventory", inventory),
+        ("finance_transactions", finance_transactions),
+        ("fee_status", fee_status_requests),
+        ("approval_requests", approval_requests),
+    ]:
+        unified_approvals.extend(approval_entry(source_type, item) for item in items)
+    unified_approvals.sort(key=lambda item: str(item.get("submitted_at") or ""), reverse=True)
+
     # =========================
     # SERIALIZE ONCE (CLEANER + FASTER)
     # =========================
@@ -2753,12 +2802,17 @@ async def get_pending_items(
             },
 
             "operations": {
+                "students": serialize_docs(students),
                 "results": serialize_docs(results),
                 "attendance": serialize_docs(attendance),
                 "payments": serialize_docs(payments),
                 "announcements": serialize_docs(announcements),
                 "inventory": serialize_docs(inventory),
+                "finance_transactions": serialize_docs(finance_transactions),
+                "fee_status": serialize_docs(fee_status_requests),
+                "approval_requests": serialize_docs(approval_requests),
             },
+            "approvals": unified_approvals,
 
             "totals": {
                 "pending_users": len(pending_users),
@@ -2766,19 +2820,27 @@ async def get_pending_items(
                 "rejected_users": len(rejected_users),
                 "suspended_users": len(suspended_users),
 
+                "students": len(students),
                 "results": len(results),
                 "attendance": len(attendance),
                 "payments": len(payments),
                 "announcements": len(announcements),
                 "inventory": len(inventory),
+                "finance_transactions": len(finance_transactions),
+                "fee_status": len(fee_status_requests),
+                "approval_requests": len(approval_requests),
 
                 "all_pending_operations": sum([
                     len(pending_users),
+                    len(students),
                     len(results),
                     len(attendance),
                     len(payments),
                     len(announcements),
-                    len(inventory)
+                    len(inventory),
+                    len(finance_transactions),
+                    len(fee_status_requests),
+                    len(approval_requests)
                 ])
             }
         },
@@ -2842,6 +2904,8 @@ async def approve_item(
     # COLLECTION MAP
     # =========================
     item_type = (item_type or "").lower().strip()
+    requested_item_type = item_type
+    is_fee_status_request = item_type == "fee_status"
 
     item_type_aliases = {
         "user": "users",
@@ -2871,7 +2935,8 @@ async def approve_item(
         "announcements": db.announcements,
         "transactions": db.finance_transactions,
         "finance_transactions": db.finance_transactions,
-        "inventory": db.inventory
+        "inventory": db.inventory,
+        "approval_requests": db.approval_requests,
     }
 
     collection = collection_map.get(item_type)
@@ -2898,6 +2963,14 @@ async def approve_item(
             detail="Item not found"
         )
 
+    current_approval_status = (
+        item.get("fee_status_approval_status") if is_fee_status_request
+        else item.get("status") if item_type == "approval_requests"
+        else item.get("approval_status")
+    )
+    if str(current_approval_status or "").lower() != "pending":
+        raise HTTPException(status_code=409, detail="Approval request has already been processed")
+
     # =========================
     # UPDATE PAYLOAD
     # =========================
@@ -2909,6 +2982,10 @@ async def approve_item(
         "approval_date": action_time,
         "updated_at": action_time
     }
+
+    if item_type == "approval_requests":
+        update_data.pop("approval_status", None)
+        update_data["status"] = action
 
     if action == "approved":
         update_data.update({
@@ -2949,7 +3026,8 @@ async def approve_item(
         update_data["visible_to_student"] = False
     elif item_type == "results":
         update_data["visible_to_student"] = action == "approved"
-    elif item_type == "students" and item.get("fee_status_approval_status") == "pending":
+    elif is_fee_status_request:
+        update_data.pop("approval_status", None)
         update_data["fee_status_approval_status"] = action
         update_data["fee_status_visible"] = action == "approved"
 
@@ -2960,7 +3038,6 @@ async def approve_item(
         query,
         {"$set": update_data}
     )
-
     # =========================
     # FETCH UPDATED ITEM
     # =========================
@@ -2969,7 +3046,7 @@ async def approve_item(
         "approval_action",
         current_user,
         {
-            "item_type": item_type,
+            "item_type": requested_item_type,
             "item_id": item_id,
             "approval_status": action,
             "reason": payload.reason,
@@ -2983,7 +3060,7 @@ async def approve_item(
     return {
         "success": True,
         "message": f"{item_type} {action} successfully",
-        "item_type": item_type,
+        "item_type": requested_item_type,
         "item_id": item_id,
         "approval_status": action,
         "updated_item": response_item,
@@ -3752,11 +3829,7 @@ async def join_school(payload: dict, http_request: Request):
         full_name = (payload.get("full_name") or "").strip()
         phone = (payload.get("phone") or "").strip() or None
         raw_role = (payload.get("role") or "")
-        admission_number = (payload.get("admission_number") or "").strip() or None
-        student_access_code = (payload.get("student_access_code") or "").strip().upper() or None
         selected_classes = payload.get("selected_classes") or []
-        child_name = (payload.get("child_name") or "").strip() or None
-        child_admission_number = (payload.get("child_admission_number") or "").strip() or None
 
         role = normalize_role(raw_role).lower()
         await enforce_rate_limit("join_school", request_fingerprint(http_request, email, school_code, invite_code, role))
@@ -3784,14 +3857,7 @@ async def join_school(payload: dict, http_request: Request):
         # =========================
         # ROLE VALIDATION
         # =========================
-        blocked_staff_roles = STAFF_AUTH_ROLES
-        if role in blocked_staff_roles:
-            raise HTTPException(
-                status_code=403,
-                detail="Staff accounts can only be created by the School Admin from Staff Management"
-            )
-
-        allowed_roles = ["parent"]
+        allowed_roles = sorted(STAFF_AUTH_ROLES)
 
         if role not in allowed_roles:
             raise HTTPException(
@@ -3826,26 +3892,6 @@ async def join_school(payload: dict, http_request: Request):
         school_name = school.get("name")
 
         school_fingerprint = school.get("fingerprint")
-
-        linked_student = None
-        if role == "parent":
-            if not child_name or not child_admission_number:
-                raise HTTPException(status_code=400, detail="Child name and admission number or student access code are required for Parent/Guardian")
-            linked_student = await db.students.find_one({
-                "school_id": school_id,
-                "approval_status": "approved",
-                "$or": [
-                    {"admission_number": child_admission_number},
-                    {"student_access_code": child_admission_number.strip().upper()},
-                ],
-            })
-            if linked_student:
-                admission_number = linked_student.get("admission_number")
-                student_access_code = linked_student.get("student_access_code")
-            else:
-                raise HTTPException(status_code=404, detail="No approved student matches that admission number or student access code")
-
-        selected_classes = []
 
         # =========================
         # DUPLICATE CHECK
@@ -3890,12 +3936,7 @@ async def join_school(payload: dict, http_request: Request):
             # =========================
             # OPTIONAL DATA
             # =========================
-            "admission_number": admission_number,
-            "student_access_code": student_access_code,
-            "student_id": linked_student.get("id") if linked_student else None,
             "selected_classes": selected_classes,
-            "child_name": child_name,
-            "child_admission_number": child_admission_number,
             "join_request_submitted_at": now_utc(),
 
             # =========================
@@ -3934,8 +3975,6 @@ async def join_school(payload: dict, http_request: Request):
                 "approval_status": "pending",
                 "is_active": False,
                 "selected_classes": selected_classes,
-                "child_name": child_name,
-                "child_admission_number": child_admission_number
             }
         }
 
@@ -4665,7 +4704,7 @@ async def update_school(
             "invite_code",
             "fingerprint",
             "join_slug",
-            "created_at"
+            "created_at",
         }
 
         for field in protected_fields:
@@ -4868,7 +4907,6 @@ async def create_student(
             "hospital_letter_url": request.hospital_letter_url,
             "previous_school": request.previous_school,
             "transfer_reason": request.transfer_reason,
-            "last_class": request.last_class,
             "documents_attached": request.documents_attached or [],
 
             "status": "active",
@@ -4900,21 +4938,7 @@ async def create_student(
             }
         )
 
-        # =========================
-        # FIX: CENTRAL APPROVAL SYSTEM ONLY
-        # =========================
-        if student_data["approval_status"] == "pending":
-
-            await db.approvals.insert_one({
-                "id": str(uuid.uuid4()),
-                "type": "student",
-                "item_id": student_data["id"],
-                "school_id": school_id,
-                "status": "pending",
-                "submitted_by": actor_id,
-                "created_at": now
-            })
-        else:
+        if student_data["approval_status"] == "approved":
             await ensure_current_report_for_student(school_id, student_data, current_user)
 
         return {
@@ -5100,6 +5124,7 @@ async def update_student(
             )
 
         update_data = dict(update_data)
+        update_data.pop("last" + "_class", None)
 
         # =========================
         # REMOVE PROTECTED FIELDS
@@ -5520,21 +5545,6 @@ async def initiate_payment(
                 "approval_status": payment["approval_status"],
             }
         )
-
-        # =========================
-        # APPROVAL QUEUE SYNC
-        # =========================
-        if payment["approval_status"] == "pending":
-
-            await db.approvals.insert_one({
-                "id": str(uuid.uuid4()),
-                "type": "payment",
-                "item_id": payment_id,
-                "school_id": school_id,
-                "status": "pending",
-                "submitted_by": user_id,
-                "created_at": now
-            })
 
         return {
             "success": True,
@@ -7214,17 +7224,6 @@ async def create_announcement(
                 "approval_status": announcement["approval_status"],
             }
         )
-
-        if announcement["approval_status"] == "pending":
-            await db.approvals.insert_one({
-                "id": str(uuid.uuid4()),
-                "type": "announcement",
-                "item_id": announcement["id"],
-                "school_id": school_id,
-                "status": "pending",
-                "submitted_by": user_id,
-                "created_at": now
-            })
 
         return api_success(
             serialize_doc(announcement),

@@ -32,6 +32,8 @@ export default function PwaInstallPrompt() {
     const captureInstall = (event) => {
       event.preventDefault();
       setInstallEvent(event);
+      window.__smartMHubInstallAvailable = true;
+      window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: true } }));
       if (!localStorage.getItem(DISMISSED_KEY) && !isStandalone()) {
         window.setTimeout(() => setOpen(true), 1800);
       }
@@ -40,6 +42,8 @@ export default function PwaInstallPrompt() {
     const installed = () => {
       setOpen(false);
       setInstallEvent(null);
+      window.__smartMHubInstallAvailable = false;
+      window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: false } }));
       localStorage.removeItem(DISMISSED_KEY);
     };
 
@@ -77,6 +81,8 @@ export default function PwaInstallPrompt() {
     await installEvent.prompt();
     await installEvent.userChoice;
     setInstallEvent(null);
+    window.__smartMHubInstallAvailable = false;
+    window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: false } }));
     setOpen(false);
   };
 

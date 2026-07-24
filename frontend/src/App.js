@@ -348,7 +348,7 @@ function App() {
           {/* JOIN SCHOOL */}
           <Route
             path="/join-school"
-            element={<ParentSignUpPage />}
+            element={<JoinSchoolPage />}
           />
 
           <Route

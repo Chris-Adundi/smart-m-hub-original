@@ -27,7 +27,10 @@ import { Building2, GraduationCap } from "lucide-react";
 const SCHOOL_CODE_PATTERN = /^(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})$/;
 
 const roleOptions = [
-  { value: "parent", label: "Parent/Guardian" },
+  { value: "teacher", label: "Teacher" },
+  { value: "secretary", label: "Secretary" },
+  { value: "finance", label: "Finance" },
+  { value: "supporting_staff", label: "Supporting Staff" },
 ];
 
 const JoinSchoolPage = () => {
@@ -52,8 +55,6 @@ const JoinSchoolPage = () => {
     password: "",
     role: "",
     selected_classes: [],
-    child_name: "",
-    child_admission_number: "",
   });
 
   const updateField = (field, value) => {
@@ -64,7 +65,6 @@ const JoinSchoolPage = () => {
   };
 
   const normalizedSchoolCode = formData.school_code.trim().toUpperCase();
-  const isParent = formData.role === "parent";
 
   useEffect(() => {
     const inviteValue = formData.invite_code.trim();
@@ -118,9 +118,6 @@ const JoinSchoolPage = () => {
     if (!formData.phone.trim()) return toast.error("Phone number is required");
     if (!formData.password) return toast.error("Password is required");
     if (!formData.role) return toast.error("Please select a role");
-    if (isParent && (!formData.child_name.trim() || !formData.child_admission_number.trim())) {
-      return toast.error("Child name and admission number or student access code are required");
-    }
 
     try {
       setLoading(true);
@@ -133,8 +130,6 @@ const JoinSchoolPage = () => {
         password: formData.password,
         role: formData.role,
         selected_classes: [],
-        child_name: isParent ? formData.child_name.trim() : null,
-        child_admission_number: isParent ? formData.child_admission_number.trim() : null,
       });
 
       toast.success(
@@ -161,9 +156,9 @@ const JoinSchoolPage = () => {
             )}
           </div>
           <div>
-            <CardTitle className="text-3xl font-bold text-white">Parent/Guardian Registration</CardTitle>
+            <CardTitle className="text-3xl font-bold text-white">Staff Join School Request</CardTitle>
             <CardDescription className="text-slate-400 mt-2">
-              Submit a parent or guardian account request for an already registered school.
+              Join the correct school and send your requested role to the School Admin for approval.
             </CardDescription>
           </div>
         </CardHeader>
@@ -236,29 +231,14 @@ const JoinSchoolPage = () => {
               </Select>
             </div>
 
-            {isParent && (
-              <div className="grid md:grid-cols-2 gap-4 rounded-lg border border-white/10 p-4">
-                <div className="space-y-2">
-                  <Label>Child Name</Label>
-                  <Input value={formData.child_name} onChange={(e) => updateField("child_name", e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Child Admission Number or Student Access Code</Label>
-                  <Input
-                    value={formData.child_admission_number}
-                    onChange={(e) => updateField("child_admission_number", e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
             <Button type="submit" className="w-full" disabled={loading || resolving}>
               {loading ? "Submitting Request..." : "Submit Join Request"}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-sm text-slate-500">
-            Staff accounts are created by the school administrator from Staff Management.{" "}
+            Parent or guardian?{" "}
+            <Link to="/parent-sign-up" className="text-emerald-300 hover:text-emerald-200">Use secure Parent/Guardian Sign Up</Link>.{" "}
             <Link to="/login" className="text-emerald-300 hover:text-emerald-200">
               Already have an account?
             </Link>

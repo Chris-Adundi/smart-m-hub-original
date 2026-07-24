@@ -90,6 +90,7 @@ const defaultPending = {
   approved_users: [],
   rejected_users: [],
   deactivated_users: [],
+  approvals: [],
   results: [],
   attendance: [],
   payments: [],
@@ -271,6 +272,9 @@ const isStudent =
                 nestedUsers.suspended ||
                 [],
 
+              approvals:
+                nested.approvals || [],
+
               results:
                 data.results ||
                 nestedOps.results ||
@@ -348,9 +352,19 @@ const isStudent =
 
   const interval = setInterval(() => {
     fetchDashboardData();
-  }, 60000);
+  }, 10000);
 
-  return () => clearInterval(interval);
+  const refreshWhenVisible = () => {
+    if (document.visibilityState === "visible") fetchDashboardData();
+  };
+  window.addEventListener("focus", refreshWhenVisible);
+  document.addEventListener("visibilitychange", refreshWhenVisible);
+
+  return () => {
+    clearInterval(interval);
+    window.removeEventListener("focus", refreshWhenVisible);
+    document.removeEventListener("visibilitychange", refreshWhenVisible);
+  };
 }, [fetchDashboardData, user]);
   const handleUserStatusAction = async (item, action) => {
     const userId = item?.id || item?._id || item?.mongo_id || item?.user_id;
@@ -382,6 +396,26 @@ const isStudent =
       await fetchDashboardData();
     } catch (error) {
       toast.error(formatApiError(error, "User action failed"));
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleApprovalAction = async (approval, action) => {
+    try {
+      setApprovalLoading(true);
+      await apiClient.patch(`/admin/approve/${approval.item_type}/${approval.item_id}`, {
+        action,
+        reason: action === "rejected" ? "Rejected by School Admin" : "Approved by School Admin",
+      });
+      setPending((current) => ({
+        ...current,
+        approvals: current.approvals.filter((item) => item.id !== approval.id),
+      }));
+      toast.success(`Request ${action}`);
+      await fetchDashboardData();
+    } catch (error) {
+      toast.error(formatApiError(error, "Approval action failed"));
     } finally {
       setApprovalLoading(false);
     }
@@ -459,7 +493,7 @@ const isStudent =
         0,
       icon: ClipboardCheck,
       show: isAdmin,
-      path: "#school-users",
+      path: "#pending-approvals",
     },
 
     {
@@ -844,6 +878,49 @@ const isStudent =
       )}
 
       {isAdmin && (
+        <Card id="pending-approvals" className="bg-[#1A2332] border-[#1E293B]">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <ClipboardCheck className="w-5 h-5 text-emerald-400" />
+              <div>
+                <h2 className="text-lg font-semibold text-white">Pending Approvals</h2>
+                <p className="text-sm text-slate-400">All pending requests for this school, newest first.</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {pending.approvals.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">No pending approvals</div>
+              ) : pending.approvals.map((approval) => (
+                <details key={approval.id} className="rounded-xl border border-[#263348] bg-[#0F172A] p-4 open:border-emerald-500/40">
+                  <summary className="cursor-pointer list-none flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-white">{approval.title}</p>
+                      <p className="text-xs text-slate-400 capitalize">{approval.item_type.replaceAll("_", " ")} · {formatDate(approval.submitted_at)}</p>
+                    </div>
+                    <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-300">Open details</span>
+                  </summary>
+                  <div className="mt-4 border-t border-white/10 pt-4 space-y-4">
+                    <div className="grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-3">
+                      {Object.entries(approval.details || {}).map(([key, value]) => (
+                        <div key={key}>
+                          <p className="text-xs text-slate-500">{key.replaceAll("_", " ")}</p>
+                          <p className="break-words text-slate-300">{value && typeof value === "object" ? JSON.stringify(value) : String(value ?? "-")}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button disabled={approvalLoading} onClick={() => handleApprovalAction(approval, "approved")}>Approve</Button>
+                      <Button disabled={approvalLoading} variant="destructive" onClick={() => handleApprovalAction(approval, "rejected")}>Reject</Button>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isAdmin && (
         <Card id="school-users" className="bg-[#1A2332] border-[#1E293B]">
           <CardContent className="p-6">
             <div className="flex items-center gap-3 mb-6">
@@ -856,23 +933,12 @@ const isStudent =
               </div>
             </div>
 
-            <Tabs defaultValue="pending">
+            <Tabs defaultValue="active">
               <TabsList className="bg-[#0F172A] flex flex-wrap gap-2">
-                <TabsTrigger value="pending">Pending ({pending.pending_users.length})</TabsTrigger>
                 <TabsTrigger value="active">Active ({pending.approved_users.length})</TabsTrigger>
                 <TabsTrigger value="rejected">Rejected ({pending.rejected_users.length})</TabsTrigger>
                 <TabsTrigger value="deactivated">Deactivated ({pending.deactivated_users.length})</TabsTrigger>
               </TabsList>
-
-              <TabsContent value="pending" className="mt-4">
-                <div className="space-y-3">
-                  {pending.pending_users.length === 0 ? (
-                    <div className="text-center py-8 text-slate-400">No pending users</div>
-                  ) : (
-                    pending.pending_users.map((item) => renderUserRow(item, "pending"))
-                  )}
-                </div>
-              </TabsContent>
 
               <TabsContent value="active" className="mt-4">
                 <div className="space-y-3">

@@ -32,7 +32,7 @@ import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Plus, Search } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
-import { ALL_CBC_CLASSES, classLevelsForSchool } from "@/utils/schoolClasses";
+import { classLevelsForSchool } from "@/utils/schoolClasses";
 
 const initialForm = {
   admission_number: "",
@@ -68,7 +68,6 @@ const initialForm = {
   hospital_letter_url: "",
   previous_school: "",
   transfer_reason: "",
-  last_class: "",
   documents_attached: [],
   other_document: "",
 };
@@ -277,17 +276,6 @@ const StudentsPage = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Last Class</Label>
-                  <Select value={formData.last_class} onValueChange={(value) => updateField("last_class", value)}>
-                    <SelectTrigger><SelectValue placeholder="Select last class" /></SelectTrigger>
-                    <SelectContent>
-                      {ALL_CBC_CLASSES.map((className) => (
-                        <SelectItem key={className} value={className}>{className}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="md:col-span-2">
                   <Label>Special Needs</Label>
                   <Textarea value={formData.special_needs} onChange={(e) => updateField("special_needs", e.target.value)} />
@@ -432,7 +420,7 @@ const StudentsPage = () => {
               <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_access_code", "student_id", "full_name", "status", "approval_status"])} />
               <ProfileTab value="personal" data={pick(selectedStudent, ["gender", "date_of_birth", "birth_certificate_no", "nationality", "religion", "special_needs"])} />
               <ProfileTab value="parent/guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
-              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school", "transfer_reason", "last_class"])} />
+              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school", "transfer_reason"])} />
               <ProfileTab value="attendance" data={{ note: "Attendance history is preserved through the attendance module." }} />
               <ProfileTab value="finance" data={{ note: "Fee balances and receipts are managed through Finance and Student Portal." }} />
               <ProfileTab value="discipline" data={{ note: "Discipline history is retained for audit and reporting." }} />

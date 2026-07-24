@@ -7,6 +7,7 @@ import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { authService } from "@/services/authService";
 import { API } from "@/App";
 import { Button } from "@/components/ui/button";
+import { usePwaInstallAvailability } from "@/components/InstallSmartMHub";
 
 import {
   LayoutDashboard,
@@ -170,6 +171,7 @@ const MENU_ITEMS = [
 // COMPONENT
 // =========================
 const DashboardLayout = () => {
+  const installAvailable = usePwaInstallAvailability();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -338,8 +340,10 @@ const DashboardLayout = () => {
 
           <Button
             variant="ghost"
+            disabled={!installAvailable}
             onClick={() => window.dispatchEvent(new Event("smart-m-hub:install"))}
             className="w-full justify-start"
+            title={installAvailable ? "Install Smart M Hub" : "Installation is not currently available in this browser"}
           >
             <Download className="w-4 h-4 mr-2" />
             Install Smart M Hub
