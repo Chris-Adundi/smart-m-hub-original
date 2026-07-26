@@ -3,6 +3,7 @@ import {
   useState,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -122,6 +123,7 @@ const Dashboard = () => {
   const [schoolIdentity, setSchoolIdentity] = useState(null);
   const [globalAnnouncements, setGlobalAnnouncements] = useState([]);
   const [supportNotices, setSupportNotices] = useState([]);
+  const dashboardRequestInFlight = useRef(false);
 
   // =========================
 // SAFE USER
@@ -184,6 +186,8 @@ const isStudent =
 
   const fetchDashboardData =
     useCallback(async () => {
+      if (dashboardRequestInFlight.current) return;
+      dashboardRequestInFlight.current = true;
       try {
         setLoading(true);
 
@@ -330,6 +334,7 @@ const isStudent =
           "Failed to load dashboard"
         );
       } finally {
+        dashboardRequestInFlight.current = false;
         setLoading(false);
       }
     }, [isAdmin, isSchoolAdmin, isFinance, isSecretary]);
@@ -350,9 +355,9 @@ const isStudent =
  useEffect(() => {
   if (!user) return;
 
-  const interval = setInterval(() => {
-    fetchDashboardData();
-  }, 10000);
+  const interval = isAdmin ? setInterval(() => {
+    if (document.visibilityState === "visible") fetchDashboardData();
+  }, 30000) : null;
 
   const refreshWhenVisible = () => {
     if (document.visibilityState === "visible") fetchDashboardData();
@@ -361,11 +366,11 @@ const isStudent =
   document.addEventListener("visibilitychange", refreshWhenVisible);
 
   return () => {
-    clearInterval(interval);
+    if (interval) clearInterval(interval);
     window.removeEventListener("focus", refreshWhenVisible);
     document.removeEventListener("visibilitychange", refreshWhenVisible);
   };
-}, [fetchDashboardData, user]);
+}, [fetchDashboardData, isAdmin, user]);
   const handleUserStatusAction = async (item, action) => {
     const userId = item?.id || item?._id || item?.mongo_id || item?.user_id;
     if (!userId) {

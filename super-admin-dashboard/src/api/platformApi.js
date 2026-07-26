@@ -107,6 +107,12 @@ export async function activateSchool(id) {
   return data;
 }
 
+export async function deleteSchool(id) {
+  if (!id) throw new Error("School ID is required");
+  const { data } = await api.delete(`/schools/${encodeURIComponent(id)}`);
+  return data;
+}
+
 export async function resetSchoolPassword(id, password) {
   const { data } = await api.post(`/schools/${encodeURIComponent(id)}/reset-password`, { password });
   return data;

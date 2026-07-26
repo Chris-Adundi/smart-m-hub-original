@@ -1,4 +1,6 @@
 import calendar
+import asyncio
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from collections import defaultdict
@@ -22,6 +24,10 @@ def school_lookup(school_id: str):
     if ObjectId.is_valid(school_id):
         conditions.append({"_id": ObjectId(school_id)})
     return {"$or": conditions}
+
+
+def active_school_lookup(school_id: str):
+    return {**school_lookup(school_id), "deleted_at": {"$exists": False}}
 
 
 def serialize_doc(doc: dict):
@@ -425,8 +431,21 @@ async def system_health(user=Depends(require_super_admin)):
 
 
 @router.get("/schools")
-async def get_all_schools(user=Depends(require_super_admin)):
-    school_docs = await db.schools.find().sort("created_at", -1).to_list(5000)
+async def get_all_schools(
+    page: int = 1,
+    limit: int = 100,
+    search: str = "",
+    user=Depends(require_super_admin),
+):
+    page = max(1, int(page or 1))
+    limit = max(1, min(int(limit or 100), 200))
+    query = {"deleted_at": {"$exists": False}}
+    normalized_search = str(search or "").strip()
+    if normalized_search:
+        pattern = {"$regex": re.escape(normalized_search), "$options": "i"}
+        query["$or"] = [{"name": pattern}, {"school_code": pattern}, {"email": pattern}]
+    total = await db.schools.count_documents(query)
+    school_docs = await db.schools.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
     school_ids = [str(school.get("id") or school.get("_id")) for school in school_docs]
 
     users_by_school = defaultdict(list)
@@ -497,12 +516,19 @@ async def get_all_schools(user=Depends(require_super_admin)):
         )
         for school in school_docs
     ]
-    return {"count": len(schools), "schools": schools}
+    return {
+        "count": len(schools),
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": max(1, (total + limit - 1) // limit),
+        "schools": schools,
+    }
 
 
 @router.get("/schools/pending")
 async def get_pending_schools(user=Depends(require_super_admin)):
-    schools_response = await get_all_schools(user)
+    schools_response = await get_all_schools(page=1, limit=200, user=user)
     schools = [
         school
         for school in schools_response["schools"]
@@ -513,22 +539,25 @@ async def get_pending_schools(user=Depends(require_super_admin)):
 
 @router.get("/schools/{school_id}")
 async def get_school_detail(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
 
     school_id = str(school.get("id") or school_id)
-    users = await db.users.find({"school_id": school_id}, {"_id": 0, "password_hash": 0, "temporary_password": 0}).to_list(1000)
-    students = await db.students.count_documents({"school_id": school_id})
-    staff = await db.users.count_documents({"school_id": school_id, "role": {"$in": ["teacher", "finance", "secretary"]}})
-    payments = await db.payments.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
-    invoices = await db.platform_invoices.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    tickets = await db.support_tickets.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
-    logs = await db.audit_logs.find({"school_id": school_id}, {"_id": 0}).sort("timestamp", -1).limit(100).to_list(100)
+    users, students, staff, payments, invoices, tickets, logs, storage = await asyncio.gather(
+        db.users.find({"school_id": school_id}, {"_id": 0, "password_hash": 0, "temporary_password": 0}).to_list(500),
+        db.students.count_documents({"school_id": school_id}),
+        db.users.count_documents({"school_id": school_id, "role": {"$in": ["teacher", "finance", "secretary"]}}),
+        db.payments.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100),
+        db.platform_invoices.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100),
+        db.support_tickets.find({"school_id": school_id}, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100),
+        db.audit_logs.find({"school_id": school_id}, {"_id": 0}).sort("timestamp", -1).limit(100).to_list(100),
+        asyncio.to_thread(upload_storage_usage, school_id),
+    )
     today = datetime.now(timezone.utc).date().isoformat()
     audit_today = sum(1 for log in logs if is_today(log.get("timestamp"), today))
 
-    detail = await serialize_school(school)
+    detail = serialize_school_summary(school, users, students, payments, invoices)
     detail.update({
         "general_information": serialize_doc(school),
         "branding": {
@@ -553,7 +582,7 @@ async def get_school_detail(school_id: str, user=Depends(require_super_admin)):
         "system_usage": {"active_users": sum(1 for u in users if u.get("is_active") is not False)},
         "login_history": [u for u in users if u.get("last_login")],
         "api_usage": {"requests_today": audit_today, "recent_events": len(logs)},
-        "storage_usage": upload_storage_usage(school_id),
+        "storage_usage": storage,
         "support_tickets": tickets,
         "audit_logs": logs,
         "recent_activities": logs[:10],
@@ -561,9 +590,65 @@ async def get_school_detail(school_id: str, user=Depends(require_super_admin)):
     return detail
 
 
+@router.delete("/schools/{school_id}")
+async def delete_school(school_id: str, user=Depends(require_super_admin)):
+    school = await db.schools.find_one(active_school_lookup(school_id))
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    canonical_id = str(school.get("id") or school_id)
+    if not canonical_id:
+        raise HTTPException(status_code=409, detail="School record has no stable tenant ID")
+    now = now_iso()
+    deletion_id = str(ObjectId())
+
+    # Soft deletion keeps tenant records consistently attached and recoverable,
+    # while immediately revoking access. The tombstone is excluded everywhere
+    # in platform school management by school_lookup/get_all_schools.
+    await db.schools.update_one(
+        {"_id": school["_id"], "deleted_at": {"$exists": False}},
+        {"$set": {
+            "deleted_at": now,
+            "deleted_by": user.get("user_id"),
+            "deletion_id": deletion_id,
+            "status": "deleted",
+            "approval_status": "deleted",
+            "subscription_status": "inactive",
+            "is_active": False,
+            "updated_at": now,
+        }},
+    )
+    users_result = await db.users.update_many(
+        {"school_id": canonical_id},
+        {"$set": {
+            "is_active": False,
+            "is_blocked": True,
+            "status": "school_deleted",
+            "auth_revoked_at": now,
+            "updated_at": now,
+        }},
+    )
+    await db.auth_sessions.update_many(
+        {"school_id": canonical_id, "revoked": {"$ne": True}},
+        {"$set": {"revoked": True, "revoked_at": now, "revocation_reason": "school_deleted"}},
+    )
+    await log_action(
+        "school_deleted",
+        user,
+        canonical_id,
+        {"deletion_id": deletion_id, "users_disabled": getattr(users_result, "modified_count", 0)},
+    )
+    return {
+        "message": "School deleted and tenant access revoked",
+        "school_id": canonical_id,
+        "deletion_id": deletion_id,
+        "retention": "Tenant data is retained under the deleted school tombstone for safe recovery and controlled cleanup.",
+    }
+
+
 @router.patch("/schools/{school_id}/approve")
 async def approve_school(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -596,7 +681,7 @@ async def approve_school(school_id: str, user=Depends(require_super_admin)):
 
 @router.patch("/schools/{school_id}/reject")
 async def reject_school(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -624,7 +709,7 @@ async def reject_school(school_id: str, user=Depends(require_super_admin)):
 
 @router.patch("/schools/{school_id}/suspend")
 async def suspend_school(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -635,7 +720,7 @@ async def suspend_school(school_id: str, user=Depends(require_super_admin)):
 
 @router.patch("/schools/{school_id}/activate")
 async def activate_school(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -646,7 +731,7 @@ async def activate_school(school_id: str, user=Depends(require_super_admin)):
 
 @router.patch("/schools/{school_id}/toggle")
 async def toggle_school_status(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     return await (suspend_school if school.get("is_active") else activate_school)(school_id, user)
@@ -654,7 +739,7 @@ async def toggle_school_status(school_id: str, user=Depends(require_super_admin)
 
 @router.post("/schools/{school_id}/reset-password")
 async def reset_school_admin_password(school_id: str, data: dict, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -674,7 +759,7 @@ async def reset_school_admin_password(school_id: str, data: dict, user=Depends(r
 
 @router.get("/schools/{school_id}/users")
 async def school_users(school_id: str, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     canonical_id = str(school.get("id") or school_id)
@@ -881,7 +966,7 @@ async def update_platform_control(data: dict, user=Depends(require_super_admin))
 
 @router.patch("/schools/{school_id}/subscription")
 async def update_subscription(school_id: str, data: dict, user=Depends(require_super_admin)):
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     await db.schools.update_one(
@@ -916,7 +1001,7 @@ async def mark_invoice_paid(invoice_id: str, data: dict = None, user=Depends(req
     school_id = invoice.get("school_id")
     if invoice.get("invoice_type") == "subscription" and school_id:
         await db.schools.update_one(
-            school_lookup(str(school_id)),
+            active_school_lookup(str(school_id)),
             {"$set": {
                 "subscription_status": "active",
                 "payment_status": "paid",
@@ -973,7 +1058,7 @@ async def billing_check(user=Depends(require_super_admin)):
                 )
                 overdue_invoices += 1
             school_update = await db.schools.update_one(
-                school_lookup(school_id),
+                active_school_lookup(school_id),
                 {"$set": {
                     "subscription_status": "expired",
                     "payment_status": "overdue",
@@ -1082,7 +1167,7 @@ async def create_support_notice(payload: dict, user=Depends(require_super_admin)
     school_id = str(payload.get("school_id") or "").strip()
     if not school_id:
         raise HTTPException(status_code=400, detail="school_id is required")
-    school = await db.schools.find_one(school_lookup(school_id))
+    school = await db.schools.find_one(active_school_lookup(school_id))
     if not school:
         raise HTTPException(status_code=404, detail="School not found")
     notice = {

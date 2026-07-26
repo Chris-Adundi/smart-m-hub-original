@@ -121,7 +121,7 @@ const MENU_ITEMS = [
     icon: Calendar,
     label: "Timetable",
     path: "/app/timetable",
-    roles: ["school_admin", "teacher", "student"],
+    roles: ["school_admin", "teacher"],
   },
   {
     icon: Package,
@@ -133,13 +133,13 @@ const MENU_ITEMS = [
     icon: Bell,
     label: "Announcements",
     path: "/app/announcements",
-    roles: ["school_admin", "secretary", "teacher", "finance", "student"],
+    roles: ["school_admin", "secretary", "teacher", "finance"],
   },
   {
     icon: LifeBuoy,
     label: "Support",
     path: "/app/support",
-    roles: ["school_admin", "secretary", "teacher", "finance", "student"],
+    roles: ["school_admin", "secretary", "teacher", "finance"],
   },
   {
     icon: User,

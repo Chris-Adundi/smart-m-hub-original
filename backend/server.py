@@ -19,6 +19,7 @@ import secrets
 import string
 import copy
 import time
+import asyncio
 
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, field_validator
@@ -7818,6 +7819,10 @@ async def get_my_portal_data(
         if not school_id:
             raise HTTPException(status_code=403, detail="No school assigned")
 
+        role = normalize_role(current_user.get("role"))
+        if role not in {"student", "parent"}:
+            raise HTTPException(status_code=403, detail="Student or parent access required")
+
         # =========================
         # STUDENT LINKING (APPROVED ONLY)
         # Parent accounts can manage multiple children, but every child
@@ -7883,18 +7888,62 @@ async def get_my_portal_data(
 
         student_id = student["id"]
 
-        # =========================
-        # RESULTS (APPROVED ONLY)
-        # =========================
-        results = await db.results.find(
-                {
-                    "school_id": school_id,
-                    "student_id": student_id,
-                    "approval_status": "approved",
-                    "archived": {"$ne": True}
-                },
-            {"_id": 0}
-        ).to_list(500)
+        announcement_query = {
+            "school_id": school_id,
+            "approval_status": "approved",
+            "$or": [
+                {"target_audience": {"$in": ["all", "students", "parents"]}},
+                {"target_audience": "specific_students", "target_student_ids": {"$in": [student_id, str(student.get("admission_number") or "")]}},
+                {"target_audience": "class", "target_class": student.get("class_name")},
+            ],
+        }
+
+        # Independent portal reads run concurrently and are bounded. This avoids
+        # serial network round trips and unbounded tenant data loading.
+        (
+            results,
+            attendance_records,
+            payments,
+            school,
+            fee_structures,
+            visible_announcements,
+            assessment_reports,
+            report_notifications,
+        ) = await asyncio.gather(
+            db.results.find({
+                "school_id": school_id, "student_id": student_id,
+                "approval_status": "approved", "archived": {"$ne": True},
+            }, {"_id": 0}).sort("created_at", -1).to_list(200),
+            db.attendance.find({
+                "school_id": school_id, "student_id": student_id,
+                "approval_status": "approved",
+            }, {"_id": 0}).sort("date", -1).to_list(366),
+            db.payments.find({
+                "school_id": school_id, "student_id": student_id,
+                "approval_status": "approved", "visible_to_student": True,
+            }, {"_id": 0}).sort("created_at", -1).to_list(200),
+            db.schools.find_one({"id": school_id}, {"_id": 0}),
+            db.fee_structures.find({
+                "school_id": school_id, "class_name": student.get("class_name"),
+            }, {"_id": 0}).to_list(50),
+            db.announcements.find(announcement_query, {"_id": 0}).sort("created_at", -1).to_list(100),
+            db.assessment_reports.find({
+                "school_id": school_id, "student_id": student_id,
+                "status": {"$in": ["published", "archived"]},
+            }, {"_id": 0}).sort("published_at", -1).to_list(100),
+            db.notifications.find({
+                "school_id": school_id, "student_id": student_id,
+                "recipient_type": {"$in": ["student", "parent"]},
+                "report_id": {"$exists": True}, "read": False,
+            }, {"_id": 0}).sort("created_at", -1).to_list(50),
+        )
+
+        if not attendance_records:
+            attendance_records = await db.attendance.find({
+                "school_id": school_id, "entity_id": student_id,
+                "entity_type": "student", "approval_status": "approved",
+                "archived": {"$ne": True},
+            }, {"_id": 0}).sort("date", -1).to_list(366)
 
         exam_ids = [r.get("exam_id") for r in results if r.get("exam_id")]
 
@@ -7904,7 +7953,7 @@ async def get_my_portal_data(
                 "school_id": school_id
             },
             {"_id": 0}
-        ).to_list(500)
+        ).to_list(200)
 
         exam_map = {e["id"]: e for e in exams}
 
@@ -7914,48 +7963,6 @@ async def get_my_portal_data(
                 r["exam_name"] = exam.get("name")
                 r["term"] = exam.get("term")
                 r["academic_year"] = exam.get("academic_year")
-
-        # =========================
-        # ATTENDANCE (SAFE FALLBACK)
-        # =========================
-        attendance_records = await db.attendance.find(
-            {
-                "school_id": school_id,
-                "student_id": student_id,
-                "approval_status": "approved"
-            },
-            {"_id": 0}
-        ).to_list(500)
-
-        if not attendance_records:
-            attendance_records = await db.attendance.find(
-                {
-                    "school_id": school_id,
-                    "entity_id": student_id,
-                    "entity_type": "student",
-                    "approval_status": "approved",
-                    "archived": {"$ne": True}
-                },
-                {"_id": 0}
-            ).to_list(500)
-
-        # =========================
-        # PAYMENTS (SAFE SUM)
-        # =========================
-        payments = await db.payments.find(
-            {
-                "school_id": school_id,
-                "student_id": student_id,
-                "approval_status": "approved",
-                "visible_to_student": True
-            },
-            {"_id": 0}
-        ).sort("created_at", -1).to_list(500)
-
-        school = await db.schools.find_one(
-            {"id": school_id},
-            {"_id": 0}
-        )
 
         for payment in payments:
             payment["school_name"] = school.get("name") if school else None
@@ -7993,66 +8000,9 @@ async def get_my_portal_data(
             if p.get("status") in ["completed", "approved", "paid"]
         )
 
-        # =========================
-        # FEES (SAFE)
-        # =========================
-        fee_structures = await db.fee_structures.find(
-            {
-                "school_id": school_id,
-                "class_name": student.get("class_name")
-            },
-            {"_id": 0}
-        ).to_list(50)
-
         total_fees = sum(float(f.get("amount") or 0) for f in fee_structures)
 
         fee_balance = total_fees - total_paid
-
-        # =========================
-        # ANNOUNCEMENTS
-        # =========================
-        announcements = await db.announcements.find(
-            {
-                "school_id": school_id,
-                "approval_status": "approved"
-            },
-            {"_id": 0}
-        ).sort("created_at", -1).to_list(100)
-
-        visible_announcements = []
-        for announcement in announcements:
-            audience = str(announcement.get("target_audience") or "all").lower()
-            target_class = announcement.get("target_class")
-            student_targets = [str(v) for v in announcement.get("target_student_ids") or []]
-            if audience in ["all", "students", "parents"]:
-                visible_announcements.append(announcement)
-            elif audience == "specific_students" and (
-                str(student.get("id")) in student_targets or
-                str(student.get("admission_number")) in student_targets
-            ):
-                visible_announcements.append(announcement)
-            elif target_class and target_class == student.get("class_name"):
-                visible_announcements.append(announcement)
-
-        assessment_reports = await db.assessment_reports.find(
-            {
-                "school_id": school_id,
-                "student_id": student_id,
-                "status": {"$in": ["published", "archived"]},
-            },
-            {"_id": 0}
-        ).sort("published_at", -1).to_list(500)
-
-        report_notifications = await db.notifications.find(
-            {
-                "school_id": school_id,
-                "student_id": student_id,
-                "recipient_type": {"$in": ["student", "parent"]},
-                "report_id": {"$exists": True},
-                "read": False,
-            },
-            {"_id": 0}
-        ).sort("created_at", -1).to_list(100)
 
         return {
             "student": student,
@@ -8070,6 +8020,9 @@ async def get_my_portal_data(
             "fee_status_note": student.get("fee_status_note") if student.get("fee_status_visible") else None
         }
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         logger.error(f"Portal data error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -8086,13 +8039,13 @@ async def get_school_support_tickets(current_user: dict = Depends(get_current_us
         raise HTTPException(status_code=403, detail="No school assigned")
 
     role = normalize_role(current_user.get("role"))
-    if role not in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
+    if role not in ["school_admin", "teacher", "finance", "secretary"]:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
     tickets = await db.support_tickets.find(
         {"school_id": school_id},
         {"_id": 0}
-    ).sort("created_at", -1).to_list(500)
+    ).sort("created_at", -1).to_list(200)
     return tickets
 
 
@@ -8107,7 +8060,7 @@ async def create_school_support_ticket(
         raise HTTPException(status_code=403, detail="No school assigned")
 
     role = normalize_role(current_user.get("role"))
-    if role not in ["school_admin", "teacher", "finance", "secretary", "student", "parent"]:
+    if role not in ["school_admin", "teacher", "finance", "secretary"]:
         raise HTTPException(status_code=403, detail="Unauthorized")
     await enforce_rate_limit("support_ticket", request_fingerprint(request, current_user.get("user_id"), school_id))
 
@@ -8220,6 +8173,10 @@ async def update_school_support_ticket(
     school_id = current_user.get("school_id")
     if not school_id:
         raise HTTPException(status_code=403, detail="No school assigned")
+
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher", "finance", "secretary"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
 
     ticket = await db.support_tickets.find_one({"id": ticket_id, "school_id": school_id})
     if not ticket:
@@ -9366,6 +9323,7 @@ async def ensure_database_indexes():
     index_specs = [
         (db.schools, [("school_code", 1)], {"unique": True, "sparse": True, "name": "unique_school_code"}),
         (db.schools, [("id", 1)], {"name": "school_id_idx"}),
+        (db.schools, [("deleted_at", 1), ("created_at", -1)], {"name": "schools_active_created_idx"}),
         (db.users, [("school_id", 1), ("email", 1)], {"name": "users_school_email_idx"}),
         (db.users, [("id", 1)], {"name": "users_id_idx"}),
         (db.users, [("school_id", 1), ("role", 1), ("status", 1)], {"name": "users_school_role_status_idx"}),
@@ -9375,9 +9333,11 @@ async def ensure_database_indexes():
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
         (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),
         (db.students, [("school_id", 1), ("guardian_email", 1)], {"name": "students_school_guardian_email_idx", "sparse": True}),
+        (db.students, [("school_id", 1), ("secondary_guardian_email", 1)], {"name": "students_school_secondary_guardian_email_idx", "sparse": True}),
         (db.staff, [("school_id", 1), ("employee_number", 1)], {"name": "staff_school_employee_idx"}),
         (db.payments, [("school_id", 1), ("created_at", -1)], {"name": "payments_school_created_idx"}),
         (db.payments, [("school_id", 1), ("student_id", 1), ("created_at", -1)], {"name": "payments_school_student_created_idx"}),
+        (db.payments, [("school_id", 1), ("student_id", 1), ("approval_status", 1), ("visible_to_student", 1), ("created_at", -1)], {"name": "payments_portal_student_visibility_idx"}),
         (db.payments, [("school_id", 1), ("approval_status", 1), ("status", 1), ("created_at", -1)], {"name": "payments_school_approval_status_created_idx"}),
         (db.finance_transactions, [("school_id", 1), ("approval_status", 1), ("date", -1)], {"name": "finance_transactions_school_approval_date_idx"}),
         (db.attendance, [("school_id", 1), ("date", -1)], {"name": "attendance_school_date_idx"}),
@@ -9386,8 +9346,10 @@ async def ensure_database_indexes():
         (db.attendance, [("school_id", 1), ("approval_status", 1), ("archived", 1), ("date", -1)], {"name": "attendance_school_approval_archive_date_idx"}),
         (db.attendance_summaries, [("school_id", 1), ("week", -1), ("status", 1)], {"name": "attendance_summary_school_week_status_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
+        (db.results, [("school_id", 1), ("student_id", 1), ("approval_status", 1), ("archived", 1), ("created_at", -1)], {"name": "results_portal_student_visibility_idx"}),
         (db.results, [("school_id", 1), ("exam_id", 1), ("student_id", 1)], {"name": "results_school_exam_student_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
+        (db.announcements, [("school_id", 1), ("approval_status", 1), ("target_audience", 1), ("target_class", 1), ("created_at", -1)], {"name": "announcements_portal_audience_idx"}),
         (db.support_tickets, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "support_school_status_created_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
         (db.login_attempts, [("key", 1)], {"unique": True, "name": "login_attempt_key_idx"}),

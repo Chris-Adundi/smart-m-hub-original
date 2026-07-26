@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { activateSchool, approveSchool, getSchools, resetSchoolPassword, suspendSchool } from "../api/platformApi";
+import { activateSchool, approveSchool, deleteSchool, getSchools, resetSchoolPassword, suspendSchool } from "../api/platformApi";
 
 export default function Schools() {
   const [schools, setSchools] = useState([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const load = async () => {
     try {
-      const res = await getSchools();
+      const res = await getSchools({ page, limit: 50, search: search.trim() });
       setSchools(res.schools || []);
+      setPages(res.pages || 1);
       setError("");
     } catch (err) {
       setError(err.message);
@@ -19,17 +22,9 @@ export default function Schools() {
   };
 
   useEffect(() => {
-    load();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return schools.filter((s) =>
-      [s.name, s.school_code, s.administrator, s.email].some((value) =>
-        String(value || "").toLowerCase().includes(q)
-      )
-    );
-  }, [schools, search]);
+    const timer = window.setTimeout(load, 300);
+    return () => window.clearTimeout(timer);
+  }, [page, search]);
 
   const run = async (action) => {
     try {
@@ -40,6 +35,15 @@ export default function Schools() {
     }
   };
 
+  const confirmDelete = async (school) => {
+    const confirmation = window.prompt(`Delete ${school.name}? Type the exact school name to confirm. This immediately revokes every tenant account.`);
+    if (confirmation !== school.name) {
+      if (confirmation !== null) setError("School name did not match. Nothing was deleted.");
+      return;
+    }
+    await run(() => deleteSchool(school.id));
+  };
+
   return (
     <div>
       <div style={headerStyle}>
@@ -47,7 +51,7 @@ export default function Schools() {
           <h1 style={titleStyle}>Schools</h1>
           <p style={mutedStyle}>Search, approve, suspend, activate, bill and inspect all tenant schools.</p>
         </div>
-        <input style={inputStyle} placeholder="Search schools..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input style={inputStyle} placeholder="Search schools..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
       </div>
 
       {error && <div style={errorStyle}>{error}</div>}
@@ -62,7 +66,7 @@ export default function Schools() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => (
+            {schools.map((s) => (
               <tr key={s.id}>
                 <td style={tdStyle}>{s.logo_url ? <img src={s.logo_url} alt="" style={logoStyle} /> : <span style={avatarStyle}>{(s.name || "S").slice(0, 1)}</span>}</td>
                 <td style={tdStyle}>{s.name}</td>
@@ -84,12 +88,18 @@ export default function Schools() {
                     <button style={buttonStyle} onClick={() => navigate(`/payments?school=${s.id}`)}>Billing</button>
                     <button style={buttonStyle} onClick={() => navigate(`/schools/${s.id}#users`)}>View Users</button>
                     <button style={buttonStyle} onClick={() => navigate(`/schools/${s.id}#statistics`)}>View Statistics</button>
+                    <button style={dangerButtonStyle} onClick={() => confirmDelete(s)}>Delete School</button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+      <div style={paginationStyle}>
+        <button style={buttonStyle} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+        <span>Page {page} of {pages}</span>
+        <button style={buttonStyle} disabled={page >= pages} onClick={() => setPage((value) => Math.min(pages, value + 1))}>Next</button>
       </div>
     </div>
   );
@@ -108,4 +118,6 @@ const logoStyle = { width: 34, height: 34, borderRadius: 6, objectFit: "cover" }
 const avatarStyle = { width: 34, height: 34, borderRadius: 6, background: "#1d4ed8", display: "inline-flex", alignItems: "center", justifyContent: "center" };
 const actionsStyle = { display: "flex", flexWrap: "wrap", gap: 6, minWidth: 360 };
 const buttonStyle = { background: "#172033", color: "#dbeafe", border: "1px solid #334155", borderRadius: 6, padding: "6px 8px", cursor: "pointer", fontSize: 12 };
+const dangerButtonStyle = { ...buttonStyle, background: "#451a1a", color: "#fecaca", borderColor: "#7f1d1d" };
+const paginationStyle = { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, color: "#cbd5e1", marginTop: 14 };
 const errorStyle = { background: "#451a1a", color: "#fecaca", border: "1px solid #7f1d1d", borderRadius: 8, padding: 12, marginBottom: 16 };
