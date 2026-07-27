@@ -1,7 +1,7 @@
-const CACHE_NAME = "smart-m-hub-super-admin-static-v2";
+const CACHE_NAME = "smart-m-hub-super-admin-static-v3";
 const INSTALL_FILES = [
   "/offline.html",
-  "/manifest.webmanifest",
+  "/manifest.json",
   "/icons/super-admin-192.svg",
   "/icons/super-admin-512.svg",
 ];
