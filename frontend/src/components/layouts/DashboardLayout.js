@@ -340,10 +340,9 @@ const DashboardLayout = () => {
 
           <Button
             variant="ghost"
-            disabled={!installAvailable}
             onClick={() => window.dispatchEvent(new Event("smart-m-hub:install"))}
             className="w-full justify-start"
-            title={installAvailable ? "Install Smart M Hub" : "Installation is not currently available in this browser"}
+            title={installAvailable ? "Install Smart M Hub" : "Open installation instructions"}
           >
             <Download className="w-4 h-4 mr-2" />
             Install Smart M Hub

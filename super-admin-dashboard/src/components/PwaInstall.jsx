@@ -1,37 +1,27 @@
 import { useEffect, useState } from "react";
+import { hasPwaInstallPrompt, isPwaStandalone, promptPwaInstall, subscribeToPwaInstall } from "../pwaInstall";
 
-const standalone = () => window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
 const ios = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 export default function PwaInstall() {
-  const [prompt, setPrompt] = useState(null);
+  const [installAvailable, setInstallAvailable] = useState(hasPwaInstallPrompt);
   const [showHelp, setShowHelp] = useState(false);
 
-  useEffect(() => {
-    const ready = (event) => { event.preventDefault(); setPrompt(event); };
-    const installed = () => { setPrompt(null); setShowHelp(false); };
-    window.addEventListener("beforeinstallprompt", ready);
-    window.addEventListener("appinstalled", installed);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", ready);
-      window.removeEventListener("appinstalled", installed);
-    };
-  }, []);
+  useEffect(() => subscribeToPwaInstall(setInstallAvailable), []);
 
-  if (standalone()) return null;
+  if (isPwaStandalone()) return null;
   const install = async () => {
     if (ios()) { setShowHelp(true); return; }
-    if (!prompt) { setShowHelp(true); return; }
-    await prompt.prompt();
-    await prompt.userChoice;
-    setPrompt(null);
+    if (!installAvailable) { setShowHelp(true); return; }
+    const result = await promptPwaInstall();
+    if (result.outcome === "unavailable") setShowHelp(true);
   };
 
   return (
     <aside style={panelStyle} aria-label="Install Super Admin Dashboard">
       <div><strong>Smart M Hub - Super Admin</strong><div style={textStyle}>Install this dashboard for direct access from your device.</div></div>
       <button type="button" style={buttonStyle} onClick={install}>Install Smart M Hub</button>
-      {showHelp && <div style={helpStyle}>{ios() ? "Tap Share, then Add to Home Screen." : "Use your browser menu and choose Install app when available."}</div>}
+      {showHelp && <div style={helpStyle}>{ios() ? "Tap Share, then Add to Home Screen." : "In Chrome or Edge, open the browser menu and choose Install Smart M Hub or Install app. Installation requires HTTPS and is hidden when already installed."}</div>}
     </aside>
   );
 }

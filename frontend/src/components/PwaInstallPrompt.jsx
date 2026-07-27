@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, Share } from "lucide-react";
+import { hasPwaInstallPrompt, isPwaStandalone, promptPwaInstall, subscribeToPwaInstall } from "@/pwaInstall";
 
 const DISMISSED_KEY = "smart_m_hub_install_prompt_dismissed";
-
-const isStandalone = () =>
-  window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
 const isIosSafari = () => {
   const ua = window.navigator.userAgent;
@@ -13,12 +11,12 @@ const isIosSafari = () => {
 };
 
 export default function PwaInstallPrompt() {
-  const [installEvent, setInstallEvent] = useState(null);
+  const [installAvailable, setInstallAvailable] = useState(hasPwaInstallPrompt);
   const [open, setOpen] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
 
   const presentInstall = useCallback(() => {
-    if (isStandalone()) return;
+    if (isPwaStandalone()) return;
     if (isIosSafari()) {
       setShowIosHelp(true);
       setOpen(true);
@@ -29,43 +27,37 @@ export default function PwaInstallPrompt() {
   }, []);
 
   useEffect(() => {
-    const captureInstall = (event) => {
-      event.preventDefault();
-      setInstallEvent(event);
-      window.__smartMHubInstallAvailable = true;
-      window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: true } }));
-      if (!localStorage.getItem(DISMISSED_KEY) && !isStandalone()) {
+    const unsubscribe = subscribeToPwaInstall((available) => {
+      setInstallAvailable(available);
+      if (available && !localStorage.getItem(DISMISSED_KEY) && !isPwaStandalone()) {
         window.setTimeout(() => setOpen(true), 1800);
       }
-    };
+    });
     const manualInstall = () => presentInstall();
     const installed = () => {
       setOpen(false);
-      setInstallEvent(null);
-      window.__smartMHubInstallAvailable = false;
-      window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: false } }));
+      setInstallAvailable(false);
       localStorage.removeItem(DISMISSED_KEY);
     };
 
-    window.addEventListener("beforeinstallprompt", captureInstall);
     window.addEventListener("smart-m-hub:install", manualInstall);
     window.addEventListener("appinstalled", installed);
 
-    if (isIosSafari() && !localStorage.getItem(DISMISSED_KEY) && !isStandalone()) {
+    if (isIosSafari() && !localStorage.getItem(DISMISSED_KEY) && !isPwaStandalone()) {
       const timer = window.setTimeout(() => {
         setShowIosHelp(true);
         setOpen(true);
       }, 1800);
       return () => {
         window.clearTimeout(timer);
-        window.removeEventListener("beforeinstallprompt", captureInstall);
+        unsubscribe();
         window.removeEventListener("smart-m-hub:install", manualInstall);
         window.removeEventListener("appinstalled", installed);
       };
     }
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", captureInstall);
+      unsubscribe();
       window.removeEventListener("smart-m-hub:install", manualInstall);
       window.removeEventListener("appinstalled", installed);
     };
@@ -77,13 +69,8 @@ export default function PwaInstallPrompt() {
   };
 
   const install = async () => {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    await installEvent.userChoice;
-    setInstallEvent(null);
-    window.__smartMHubInstallAvailable = false;
-    window.dispatchEvent(new CustomEvent("smart-m-hub:install-availability", { detail: { available: false } }));
-    setOpen(false);
+    const result = await promptPwaInstall();
+    if (result.outcome !== "unavailable") setOpen(false);
   };
 
   if (!open) return null;
@@ -102,8 +89,8 @@ export default function PwaInstallPrompt() {
             <p className="mt-1 text-sm leading-6 text-slate-400">Install Smart M Hub on your phone or computer for easier access. Once installed, you can open it directly from your device without searching for the Smart M Hub link every time.</p>
           )}
           <div className="mt-4 flex gap-3">
-            {!showIosHelp && installEvent && <button type="button" onClick={install} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Install Smart M Hub</button>}
-            {!showIosHelp && !installEvent && <p className="text-xs leading-5 text-slate-400">Use your browser menu and choose Install app or Add to Home Screen when available.</p>}
+            {!showIosHelp && installAvailable && <button type="button" onClick={install} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Install Smart M Hub</button>}
+            {!showIosHelp && !installAvailable && <p className="text-xs leading-5 text-slate-400">In Chrome or Edge, open the browser menu and choose <strong>Install Smart M Hub</strong> or <strong>Install app</strong>. Installation requires HTTPS and is hidden when the app is already installed.</p>}
             <button type="button" onClick={dismiss} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5">{showIosHelp ? "Got It" : "Not Now"}</button>
           </div>
         </div>

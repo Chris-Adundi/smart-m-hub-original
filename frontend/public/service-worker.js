@@ -1,9 +1,9 @@
-const CACHE_VERSION = "smart-m-hub-static-v1";
+const CACHE_VERSION = "smart-m-hub-static-v2";
 const SAFE_SHELL = [
   "/offline.html",
   "/manifest.json",
-  "/icons/smart-m-hub-192.svg",
-  "/icons/smart-m-hub-512.svg"
+  "/icons/smart-m-hub-192.png",
+  "/icons/smart-m-hub-512.png"
 ];
 
 self.addEventListener("install", (event) => {

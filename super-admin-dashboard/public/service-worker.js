@@ -1,4 +1,4 @@
-const CACHE_NAME = "smart-m-hub-super-admin-static-v1";
+const CACHE_NAME = "smart-m-hub-super-admin-static-v2";
 const INSTALL_FILES = [
   "/offline.html",
   "/manifest.webmanifest",

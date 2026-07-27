@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import "@/index.css";
 import App from "@/App";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
+import "@/pwaInstall";
 
 const rootElement = document.getElementById("root");
 
