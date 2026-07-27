@@ -33,7 +33,16 @@ export default function PwaInstallPrompt() {
         window.setTimeout(() => setOpen(true), 1800);
       }
     });
-    const manualInstall = () => presentInstall();
+    const manualInstall = async () => {
+      if (!isIosSafari() && hasPwaInstallPrompt()) {
+        const result = await promptPwaInstall();
+        if (result.outcome !== "unavailable") {
+          setOpen(false);
+          return;
+        }
+      }
+      presentInstall();
+    };
     const installed = () => {
       setOpen(false);
       setInstallAvailable(false);
