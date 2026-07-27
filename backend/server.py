@@ -1168,7 +1168,6 @@ class CreateStudentRequest(BaseModel):
     medication: Optional[str] = None
     hospital_letter_url: Optional[str] = None
     previous_school: Optional[str] = None
-    transfer_reason: Optional[str] = None
     documents_attached: Optional[List[str]] = None
 
     status: Optional[str] = "active"
@@ -1182,8 +1181,7 @@ class CreateStaffRequest(BaseModel):
 
     employee_number: str
 
-    department: str
-    position: str
+    designation: str
 
     role: UserRole
 
@@ -1394,9 +1392,13 @@ class CreateInventoryItemRequest(BaseModel):
 
 
 class ProgressStudentsRequest(BaseModel):
+    from_class: str
+    # Accepted only for backward-compatible clients; progression uses the server calendar year.
+    academic_year: Optional[str] = None
 
-    academic_year: str
-    from_class: Optional[str] = None
+
+class TeacherClassAssignmentRequest(BaseModel):
+    class_names: List[str]
 
 
 class CBCPathwayRequest(BaseModel):
@@ -1437,14 +1439,10 @@ class CreateStaffPayload(BaseModel):
     phone: Optional[str] = None
     national_id: Optional[str] = None
     gender: Optional[str] = None
-    date_of_birth: Optional[str] = None
     passport_photo_url: Optional[str] = None
     employee_number: str
     tsc_number: Optional[str] = None
-    staff_category: Optional[str] = None
-    department: str
-    position: str
-    designation: Optional[str] = None
+    designation: str
     role: str = "teacher"
     password: str
     confirm_password: Optional[str] = None
@@ -1459,13 +1457,9 @@ class UpdateStaffPayload(BaseModel):
     phone: Optional[str] = None
     national_id: Optional[str] = None
     gender: Optional[str] = None
-    date_of_birth: Optional[str] = None
     passport_photo_url: Optional[str] = None
     employee_number: Optional[str] = None
     tsc_number: Optional[str] = None
-    staff_category: Optional[str] = None
-    department: Optional[str] = None
-    position: Optional[str] = None
     designation: Optional[str] = None
     role: Optional[str] = None
     password: Optional[str] = None
@@ -2299,7 +2293,6 @@ async def create_staff(
         "phone": payload.phone,
         "national_id": payload.national_id,
         "gender": payload.gender,
-        "date_of_birth": payload.date_of_birth,
         "passport_photo_url": payload.passport_photo_url,
         "role": staff_role,
         "approval_status": "approved",
@@ -2320,12 +2313,8 @@ async def create_staff(
         "employee_number": payload.employee_number,
         "national_id": payload.national_id,
         "gender": payload.gender,
-        "date_of_birth": payload.date_of_birth,
         "passport_photo_url": payload.passport_photo_url,
         "tsc_number": payload.tsc_number,
-        "staff_category": payload.staff_category,
-        "department": payload.department,
-        "position": payload.position,
         "designation": payload.designation,
         "role": staff_role,
         "status": account_status,
@@ -2373,6 +2362,56 @@ async def require_school_admin_staff_target(user_id: str, current_user: dict) ->
     if not target or target.get("deleted") is True:
         raise HTTPException(status_code=404, detail="Staff member not found")
     return target
+
+
+async def teacher_assigned_classes(current_user: dict) -> List[str]:
+    """Load assignments from MongoDB so admin changes work without a new login."""
+    if normalize_role(current_user.get("role")) != "teacher":
+        return []
+    school_id = str(current_user.get("school_id") or "").strip()
+    user_id = str(current_user.get("user_id") or current_user.get("id") or "").strip()
+    teacher = await db.users.find_one(
+        {"id": user_id, "school_id": school_id, "role": "teacher", "deleted": {"$ne": True}},
+        {"_id": 0, "selected_classes": 1},
+    )
+    return sorted({str(item).strip() for item in (teacher or {}).get("selected_classes", []) if str(item).strip()})
+
+
+@api_router.get("/admin/teacher-class-assignments")
+async def get_teacher_class_assignments(current_user: dict = Depends(get_current_user)):
+    if normalize_role(current_user.get("role")) != "school_admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    school_id = str(current_user.get("school_id") or "").strip()
+    teachers = await db.users.find(
+        {"school_id": school_id, "role": "teacher", "deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "full_name": 1, "email": 1, "selected_classes": 1, "status": 1},
+    ).sort("full_name", 1).to_list(length=1000)
+    student_classes = await db.students.distinct("class_name", {"school_id": school_id, "class_name": {"$nin": [None, ""]}})
+    return api_success({"teachers": serialize_docs(teachers), "classes": sorted(set(GRADE_ORDER + student_classes))})
+
+
+@api_router.put("/admin/teachers/{teacher_id}/classes")
+async def update_teacher_class_assignments(
+    teacher_id: str,
+    payload: TeacherClassAssignmentRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    teacher = await require_school_admin_staff_target(teacher_id, current_user)
+    if normalize_role(teacher.get("role")) != "teacher":
+        raise HTTPException(status_code=400, detail="Class assignments can only be applied to teachers")
+    school_id = str(current_user.get("school_id") or "").strip()
+    available = set(GRADE_ORDER)
+    available.update(await db.students.distinct("class_name", {"school_id": school_id, "class_name": {"$nin": [None, ""]}}))
+    class_names = sorted({str(item).strip() for item in payload.class_names if str(item).strip()})
+    invalid = [name for name in class_names if name not in available]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unknown class for this school: {', '.join(invalid)}")
+    await db.users.update_one(
+        {"id": teacher.get("id"), "school_id": school_id, "role": "teacher"},
+        {"$set": {"selected_classes": class_names, "updated_at": now_utc(), "updated_by": current_user.get("user_id")}},
+    )
+    await log_security_event("teacher_class_assignments_updated", current_user, {"teacher_id": teacher.get("id"), "class_names": class_names})
+    return api_success({"teacher_id": teacher.get("id"), "class_names": class_names}, message="Teacher class assignments updated")
 
 
 @api_router.put("/staff/{user_id}")
@@ -2427,12 +2466,12 @@ async def update_staff(
         })
         staff_updates["status"] = account_status
 
-    for key in ["full_name", "phone", "national_id", "gender", "date_of_birth", "passport_photo_url"]:
+    for key in ["full_name", "phone", "national_id", "gender", "passport_photo_url"]:
         if key in update:
             user_updates[key] = update[key]
             staff_updates[key] = update[key]
 
-    for key in ["employee_number", "tsc_number", "staff_category", "department", "position", "designation", "salary", "joined_date"]:
+    for key in ["employee_number", "tsc_number", "designation", "salary", "joined_date"]:
         if key in update:
             staff_updates[key] = update[key]
 
@@ -4978,7 +5017,6 @@ async def create_student(
             "medication": request.medication,
             "hospital_letter_url": request.hospital_letter_url,
             "previous_school": request.previous_school,
-            "transfer_reason": request.transfer_reason,
             "documents_attached": request.documents_attached or [],
 
             "status": "active",
@@ -5072,6 +5110,9 @@ async def get_students(
     else:
         query["approval_status"] = "approved"
 
+    if role == "teacher":
+        query["class_name"] = {"$in": await teacher_assigned_classes(current_user)}
+
     if status and status != "all":
         query["status"] = status
 
@@ -5145,6 +5186,9 @@ async def get_student(
                 detail="Not authorized to view unapproved student"
             )
 
+    if role == "teacher" and student.get("class_name") not in await teacher_assigned_classes(current_user):
+        raise HTTPException(status_code=403, detail="Student is not in one of your assigned classes")
+
     return student
 
 
@@ -5197,6 +5241,7 @@ async def update_student(
 
         update_data = dict(update_data)
         update_data.pop("last" + "_class", None)
+        update_data.pop("transfer_reason", None)
 
         # =========================
         # REMOVE PROTECTED FIELDS
@@ -5870,6 +5915,13 @@ async def mark_attendance(
                 status_code=400,
                 detail="entity_type must be 'student' or 'staff'"
             )
+        if role == "teacher":
+            if entity_type != "student":
+                raise HTTPException(status_code=403, detail="Teachers can only mark student attendance")
+            student = await db.students.find_one({"id": request.entity_id, "school_id": school_id}, {"_id": 0, "class_name": 1})
+            assigned = await teacher_assigned_classes(current_user)
+            if not student or student.get("class_name") not in assigned:
+                raise HTTPException(status_code=403, detail="Student is not in one of your assigned classes")
 
         # =========================
         # APPROVAL LOGIC
@@ -6061,6 +6113,7 @@ async def get_attendance(
 
             if approval_status and approval_status != "all":
                 query["approval_status"] = approval_status.lower()
+            query["class_name"] = {"$in": await teacher_assigned_classes(current_user)}
 
         else:
             # strict roles (parents/students/etc.)
@@ -6175,6 +6228,8 @@ async def get_exams(
     page = bounded_page(page)
     limit = bounded_limit(limit, default=100, maximum=200)
     query = {"school_id": school_id}
+    if role == "teacher":
+        query["class_name"] = {"$in": await teacher_assigned_classes(current_user)}
     total = await db.exams.count_documents(query)
     exams_cursor = db.exams.find(
         query,
@@ -6755,7 +6810,7 @@ async def promote_reports(
     request: ProgressStudentsRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    return await progress_students(request, current_user)
+    return await progress_assigned_students(request, current_user)
 
 
 @api_router.get("/assessments/reports/{report_id}/pdf")
@@ -7009,6 +7064,8 @@ async def record_result(
 
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
+        if role == "teacher" and student.get("class_name") not in await teacher_assigned_classes(current_user):
+            raise HTTPException(status_code=403, detail="Student is not in one of your assigned classes")
 
         # =========================
         # DUPLICATE CHECK
@@ -7140,6 +7197,14 @@ async def get_student_results(
         # ROLE NORMALIZATION (FIXED)
         # =========================
         role = normalize_role(current_user.get("role"))
+
+        if role == "teacher":
+            student = await db.students.find_one(
+                {"id": student_id, "school_id": school_id},
+                {"_id": 0, "class_name": 1},
+            )
+            if not student or student.get("class_name") not in await teacher_assigned_classes(current_user):
+                raise HTTPException(status_code=403, detail="Student is not in one of your assigned classes")
 
         query = {
             "school_id": school_id,
@@ -9124,6 +9189,78 @@ async def ensure_current_report_for_student(
 # ─── Student Progression System ───────────────────────────────────
 
 @api_router.post("/admin/progress-students")
+async def progress_assigned_students(
+    request: ProgressStudentsRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    school_id = str(current_user.get("school_id") or "").strip()
+    if not school_id:
+        raise HTTPException(status_code=403, detail="No school assigned")
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Teacher or admin access required")
+    from_class = str(request.from_class or "").strip()
+    if from_class not in GRADE_ORDER:
+        raise HTTPException(status_code=400, detail="Select a valid current class")
+    if from_class == GRADE_ORDER[-1]:
+        raise HTTPException(status_code=400, detail="Grade 12 is a terminal class and cannot be progressed automatically")
+    if role == "teacher" and from_class not in await teacher_assigned_classes(current_user):
+        raise HTTPException(status_code=403, detail="You are not assigned to manage this class")
+
+    academic_year = str(now_utc().year)
+    next_class = GRADE_ORDER[GRADE_ORDER.index(from_class) + 1]
+    query = {
+        "school_id": school_id,
+        "class_name": from_class,
+        "approval_status": "approved",
+        "status": "active",
+        "last_progression_academic_year": {"$ne": academic_year},
+    }
+    students = await db.students.find(
+        query,
+        {"_id": 0, "id": 1, "stream": 1},
+    ).to_list(length=10000)
+    if not students:
+        return api_success(
+            {"progressed": 0, "from_class": from_class, "to_class": next_class, "academic_year": academic_year},
+            message="No eligible students found; students already progressed this year are unchanged",
+        )
+    now = now_utc()
+    result = await db.students.update_many(query, {"$set": {
+        "class_name": next_class,
+        "year_of_study": next_class,
+        "academic_year": academic_year,
+        "last_progression_academic_year": academic_year,
+        "last_progressed_from_class": from_class,
+        "last_progressed_at": now,
+        "updated_at": now,
+    }})
+    await db.student_history.insert_many([{
+        "id": str(uuid.uuid4()),
+        "progression_key": f"{student['id']}:{academic_year}",
+        "event_type": "class_progression",
+        "action": "progressed",
+        "student_id": student["id"],
+        "school_id": school_id,
+        "academic_year": academic_year,
+        "class_name": from_class,
+        "from_class": from_class,
+        "to_class": next_class,
+        "stream": student.get("stream"),
+        "created_by": current_user.get("user_id") or current_user.get("id"),
+        "created_at": now,
+    } for student in students], ordered=False)
+    await log_security_event("student_progression_completed", current_user, {
+        "academic_year": academic_year, "from_class": from_class,
+        "to_class": next_class, "progressed": result.modified_count,
+    })
+    return api_success({
+        "progressed": result.modified_count, "from_class": from_class,
+        "to_class": next_class, "academic_year": academic_year,
+    }, message=f"{result.modified_count} students progressed to {next_class}")
+
+
+@api_router.post("/admin/progress-students-legacy", include_in_schema=False)
 async def progress_students(
     request: ProgressStudentsRequest,
     current_user: dict = Depends(get_current_user)
@@ -9295,6 +9432,8 @@ async def get_student_history(
 
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
+        if role == "teacher" and student.get("class_name") not in await teacher_assigned_classes(current_user):
+            raise HTTPException(status_code=403, detail="Student is not in one of your assigned classes")
 
         history = await db.student_history.find(
             {
@@ -9332,6 +9471,7 @@ async def ensure_database_indexes():
         (db.students, [("school_id", 1), ("student_access_code", 1)], {"name": "students_school_access_code_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
         (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),
+        (db.student_history, [("progression_key", 1)], {"unique": True, "sparse": True, "name": "unique_student_year_progression"}),
         (db.students, [("school_id", 1), ("guardian_email", 1)], {"name": "students_school_guardian_email_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("secondary_guardian_email", 1)], {"name": "students_school_secondary_guardian_email_idx", "sparse": True}),
         (db.staff, [("school_id", 1), ("employee_number", 1)], {"name": "staff_school_employee_idx"}),

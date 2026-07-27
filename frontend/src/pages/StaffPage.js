@@ -30,22 +30,18 @@ import { Badge } from "@/components/ui/badge";
 import { apiClient } from "@/App";
 import { uploadManagedFile } from "@/utils/uploads";
 import { toast } from "sonner";
-import { Edit, LockKeyhole, Plus, Search, Trash2, UserCheck, UserX } from "lucide-react";
+import { Edit, GraduationCap, LockKeyhole, Plus, Search, Trash2, UserCheck, UserX } from "lucide-react";
 
 const emptyForm = {
   full_name: "",
   national_id: "",
   gender: "",
   custom_gender: "",
-  date_of_birth: "",
   phone: "",
   email: "",
   passport_photo_url: "",
   employee_number: "",
   tsc_number: "",
-  staff_category: "",
-  department: "",
-  position: "",
   designation: "",
   custom_designation: "",
   role: "teacher",
@@ -107,6 +103,10 @@ const StaffPage = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [formData, setFormData] = useState(emptyForm);
   const [resetForm, setResetForm] = useState({ password: "", confirm_password: "" });
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [assignmentData, setAssignmentData] = useState({ teachers: [], classes: [] });
+  const [assignmentTeacherId, setAssignmentTeacherId] = useState("");
+  const [assignedClasses, setAssignedClasses] = useState([]);
 
   const fetchStaff = async () => {
     try {
@@ -122,6 +122,37 @@ const StaffPage = () => {
     }
   };
 
+  const openAssignments = async () => {
+    try {
+      const response = await apiClient.get("/admin/teacher-class-assignments");
+      const data = response?.data?.data || { teachers: [], classes: [] };
+      setAssignmentData(data);
+      setAssignmentTeacherId("");
+      setAssignedClasses([]);
+      setAssignmentOpen(true);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to load teacher assignments");
+    }
+  };
+
+  const chooseAssignmentTeacher = (teacherId) => {
+    setAssignmentTeacherId(teacherId);
+    const teacher = assignmentData.teachers.find((item) => item.id === teacherId);
+    setAssignedClasses(Array.isArray(teacher?.selected_classes) ? teacher.selected_classes : []);
+  };
+
+  const saveAssignments = async () => {
+    if (!assignmentTeacherId) return toast.error("Select a teacher");
+    try {
+      await apiClient.put(`/admin/teachers/${assignmentTeacherId}/classes`, { class_names: assignedClasses });
+      toast.success("Teacher class assignments updated");
+      setAssignmentOpen(false);
+      fetchStaff();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to update class assignments");
+    }
+  };
+
   useEffect(() => {
     fetchStaff();
   }, []);
@@ -134,8 +165,6 @@ const StaffPage = () => {
         member.email,
         member.phone,
         member.employee_number,
-        member.department,
-        member.position,
         member.designation,
       ].join(" ").toLowerCase();
       const matchesSearch = !term || haystack.includes(term);
@@ -163,15 +192,11 @@ const StaffPage = () => {
       national_id: member.national_id || "",
       gender: member.gender || "",
       custom_gender: "",
-      date_of_birth: member.date_of_birth ? String(member.date_of_birth).slice(0, 10) : "",
       phone: member.phone || "",
       email: member.email || "",
       passport_photo_url: member.passport_photo_url || "",
       employee_number: member.employee_number || "",
       tsc_number: member.tsc_number || "",
-      staff_category: member.staff_category || "",
-      department: member.department || "",
-      position: member.position || "",
       designation: member.designation || "",
       custom_designation: "",
       role: member.role || "teacher",
@@ -284,6 +309,10 @@ const StaffPage = () => {
           <p className="text-slate-600 mt-1">School-admin controlled staff accounts and access.</p>
         </div>
 
+        <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={openAssignments}>
+          <GraduationCap className="w-4 h-4 mr-2" /> Assign Teachers to Classes
+        </Button>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={openAddDialog}>
@@ -322,7 +351,6 @@ const StaffPage = () => {
                     />
                   )}
                 </div>
-                <Field label="Date of Birth" type="date" value={formData.date_of_birth} onChange={(value) => updateField("date_of_birth", value)} />
                 <Field label="Phone Number" value={formData.phone} onChange={(value) => updateField("phone", value)} required />
                 <Field label="Email Address" type="email" value={formData.email} onChange={(value) => updateField("email", value)} required />
                 <div className="space-y-2 md:col-span-2">
@@ -335,9 +363,6 @@ const StaffPage = () => {
               <FormSection title="Employment Information">
                 <Field label="Employee Number" value={formData.employee_number} onChange={(value) => updateField("employee_number", value)} required />
                 <Field label="TSC Number" value={formData.tsc_number} onChange={(value) => updateField("tsc_number", value)} />
-                <Field label="Staff Category" value={formData.staff_category} onChange={(value) => updateField("staff_category", value)} />
-                <Field label="Department" value={formData.department} onChange={(value) => updateField("department", value)} required />
-                <Field label="Position" value={formData.position} onChange={(value) => updateField("position", value)} required />
                 <div className="space-y-2">
                   <Label>Designation</Label>
                   <Select value={formData.designation} onValueChange={(value) => {
@@ -392,6 +417,7 @@ const StaffPage = () => {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card>
@@ -430,7 +456,7 @@ const StaffPage = () => {
                   <TableHead>Employee No.</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Designation</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -450,7 +476,7 @@ const StaffPage = () => {
                         <p className="text-xs text-slate-500">{member.email}</p>
                       </TableCell>
                       <TableCell>{String(member.role || "").replaceAll("_", " ")}</TableCell>
-                      <TableCell>{member.department}</TableCell>
+                      <TableCell>{member.designation || "-"}</TableCell>
                       <TableCell><Badge className={statusClass[status] || statusClass.inactive}>{status}</Badge></TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-2">
@@ -492,6 +518,43 @@ const StaffPage = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={assignmentOpen} onOpenChange={setAssignmentOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Assign Teachers to Classes</DialogTitle></DialogHeader>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label>Teacher</Label>
+              <Select value={assignmentTeacherId} onValueChange={chooseAssignmentTeacher}>
+                <SelectTrigger><SelectValue placeholder="Select teacher" /></SelectTrigger>
+                <SelectContent>
+                  {assignmentData.teachers.map((teacher) => (
+                    <SelectItem key={teacher.id} value={teacher.id}>{teacher.full_name} ({teacher.email})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {assignmentTeacherId && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {assignmentData.classes.map((className) => (
+                  <label key={className} className="flex items-center gap-2 rounded border p-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={assignedClasses.includes(className)}
+                      onChange={(event) => setAssignedClasses((current) => event.target.checked
+                        ? [...current, className]
+                        : current.filter((item) => item !== className))}
+                    />
+                    <span>{className}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="text-sm text-slate-500">Clear all selections and save to remove all class assignments.</p>
+            <Button className="w-full" onClick={saveAssignments} disabled={!assignmentTeacherId}>Save Assignments</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -521,14 +584,10 @@ function ProfileGrid({ member }) {
     ["Phone", member.phone],
     ["National ID / Passport", member.national_id],
     ["Gender", member.gender],
-    ["Date of Birth", member.date_of_birth ? String(member.date_of_birth).slice(0, 10) : "-"],
     ["Role", String(member.role || "").replaceAll("_", " ")],
     ["Designation", member.designation],
     ["Employee Number", member.employee_number],
     ["TSC Number", member.tsc_number],
-    ["Staff Category", member.staff_category],
-    ["Department", member.department],
-    ["Position", member.position],
     ["Joined Date", member.joined_date ? String(member.joined_date).slice(0, 10) : "-"],
     ["Status", staffStatus(member)],
     ["School Code", member.school_code],

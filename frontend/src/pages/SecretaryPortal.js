@@ -76,7 +76,6 @@ const SecretaryPortal = () => {
     medication: "",
     hospital_letter_url: "",
     previous_school: "",
-    transfer_reason: "",
     documents_attached: [],
     other_document: "",
   };
@@ -324,8 +323,7 @@ const SecretaryPortal = () => {
                         ["secondary_guardian_occupation", "Parent/Guardian 2 Occupation"],
                         ["secondary_guardian_national_id", "Parent/Guardian 2 National ID"],
                         ["secondary_guardian_address", "Parent/Guardian 2 Address"],
-                        ["previous_school", "Previous School"],
-                        ["transfer_reason", "Reason for Transfer"],
+                        ["previous_school", "Previous School (if any)"],
                       ].map(([field, label, type]) => (
                         <div key={field}>
                           <Label>{label}</Label>

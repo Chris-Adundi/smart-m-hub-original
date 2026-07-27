@@ -67,7 +67,6 @@ const initialForm = {
   medication: "",
   hospital_letter_url: "",
   previous_school: "",
-  transfer_reason: "",
   documents_attached: [],
   other_document: "",
 };
@@ -93,8 +92,7 @@ const textFields = [
   ["secondary_guardian_occupation", "Parent/Guardian 2 Occupation"],
   ["secondary_guardian_national_id", "Parent/Guardian 2 National ID"],
   ["secondary_guardian_address", "Parent/Guardian 2 Physical Address"],
-  ["previous_school", "Previous School"],
-  ["transfer_reason", "Reason for Transfer"],
+  ["previous_school", "Previous School (if any)"],
 ];
 
 const StudentsPage = () => {
@@ -420,7 +418,7 @@ const StudentsPage = () => {
               <ProfileTab value="overview" data={pick(selectedStudent, ["admission_number", "student_access_code", "student_id", "full_name", "status", "approval_status"])} />
               <ProfileTab value="personal" data={pick(selectedStudent, ["gender", "date_of_birth", "birth_certificate_no", "nationality", "religion", "special_needs"])} />
               <ProfileTab value="parent/guardians" data={pick(selectedStudent, ["guardian_name", "guardian_relationship", "guardian_phone", "guardian_email", "guardian_occupation", "guardian_national_id", "guardian_address", "secondary_guardian_name", "secondary_guardian_phone", "secondary_guardian_email"])} />
-              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school", "transfer_reason"])} />
+              <ProfileTab value="academics" data={pick(selectedStudent, ["class_name", "education_level", "stream", "year_of_study", "previous_school"])} />
               <ProfileTab value="attendance" data={{ note: "Attendance history is preserved through the attendance module." }} />
               <ProfileTab value="finance" data={{ note: "Fee balances and receipts are managed through Finance and Student Portal." }} />
               <ProfileTab value="discipline" data={{ note: "Discipline history is retained for audit and reporting." }} />

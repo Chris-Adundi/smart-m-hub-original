@@ -1,6 +1,9 @@
 venv/
 __pycache__/
 node_modules/
+frontend/node_modules/
+super-admin-dashboard/node_modules/
+backend/venv/
 *.pyc
 .env
 backend/uploads/
@@ -8,6 +11,7 @@ backend/uploads/
 # Frontend production builds
 frontend/build/
 super-admin-dashboard/build/
+super-admin-dashboard/dist/
 
 # Test and cache folders
 .pytest_cache/
@@ -19,3 +23,23 @@ pytest-platform-fix/
 .DS_Store
 Thumbs.db
 backups/
+
+# Generated reports, caches, archives and temporary files
+coverage/
+.coverage
+htmlcov/
+.eslintcache
+.vite/
+*.log
+*.tmp
+*.bak
+*.old
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+
+# Machine-local environment overrides (committed examples remain included)
+**/.env.local
+**/.env.*.local

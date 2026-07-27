@@ -40,6 +40,7 @@ import {
   ClipboardList,
   Award,
   Eye,
+  GraduationCap,
   Search,
 } from "lucide-react";
 
@@ -98,6 +99,8 @@ const TeacherPortal = () => {
   const [resultsDialogOpen, setResultsDialogOpen] = useState(false);
   const [attendanceDialogOpen, setAttendanceDialogOpen] = useState(false);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [progressDialogOpen, setProgressDialogOpen] = useState(false);
+  const [progressClass, setProgressClass] = useState("");
 
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentResults, setStudentResults] = useState([]);
@@ -174,6 +177,26 @@ const TeacherPortal = () => {
 
     return list.filter((a) => String(a?.date || "").startsWith(today)).length;
   }, [attendance]);
+
+  const assignedClasses = useMemo(
+    () => [...new Set(asArray(students).map((student) => student.class_name).filter(Boolean))].sort(),
+    [students]
+  );
+
+  const handleProgressStudents = async () => {
+    if (!progressClass) return toast.error("Select a class to progress");
+    const count = students.filter((student) => student.class_name === progressClass).length;
+    if (!window.confirm(`Progress ${count} student(s) from ${progressClass} for ${new Date().getFullYear()}? This cannot be repeated for the same academic year.`)) return;
+    try {
+      const response = await apiClient.post("/admin/progress-students", { from_class: progressClass });
+      toast.success(response?.data?.message || "Students progressed successfully");
+      setProgressDialogOpen(false);
+      setProgressClass("");
+      await fetchTeacherData();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to progress students");
+    }
+  };
 
   const selectedAssessmentStudent = useMemo(
     () => asArray(students).find((student) => student.id === resultForm.student_id) || null,
@@ -460,6 +483,9 @@ const TeacherPortal = () => {
           <Award className="w-4 h-4 mr-2" />
           CBC Assessment
         </Button>
+        <Button variant="outline" onClick={() => setProgressDialogOpen(true)} disabled={assignedClasses.length === 0}>
+          <GraduationCap className="w-4 h-4 mr-2" /> Progress Students
+        </Button>
       </div>
 
       {/* SAFE LIST */}
@@ -668,6 +694,27 @@ const TeacherPortal = () => {
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={progressDialogOpen} onOpenChange={setProgressDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Progress Class Roster</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Move the selected roster to its next class for academic year {new Date().getFullYear()}. Student identities and historical records are preserved.
+            </p>
+            <div className="space-y-2">
+              <Label>Current class</Label>
+              <Select value={progressClass} onValueChange={setProgressClass}>
+                <SelectTrigger><SelectValue placeholder="Select an assigned class" /></SelectTrigger>
+                <SelectContent>
+                  {assignedClasses.map((className) => <SelectItem key={className} value={className}>{className}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button className="w-full" onClick={handleProgressStudents} disabled={!progressClass}>Review and Confirm Progression</Button>
+          </div>
         </DialogContent>
       </Dialog>
 

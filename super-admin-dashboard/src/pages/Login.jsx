@@ -17,6 +17,8 @@ const API_ROOT = resolveApiRoot();
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -146,13 +148,13 @@ export default function Login() {
 
                 <label style={labelStyle}>
                   New Password
-                  <input
+                  <div style={{ position: "relative" }}><input
                     style={inputStyle}
-                    type="password"
+                    type={showResetPassword ? "text" : "password"}
                     value={resetForm.newPassword}
                     onChange={(event) => setResetForm({ ...resetForm, newPassword: event.target.value })}
                     required
-                  />
+                  /><button type="button" aria-label={showResetPassword ? "Hide password" : "Show password"} onClick={() => setShowResetPassword((value) => !value)} style={passwordButtonStyle}>{showResetPassword ? "Hide" : "Show"}</button></div>
                 </label>
               </>
             )}
@@ -172,13 +174,13 @@ export default function Login() {
 
             <label style={labelStyle}>
               Password
-              <input
+              <div style={{ position: "relative" }}><input
                 style={inputStyle}
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
-              />
+              /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword((value) => !value)} style={passwordButtonStyle}>{showPassword ? "Hide" : "Show"}</button></div>
             </label>
           </>
         )}
@@ -231,11 +233,24 @@ const titleStyle = { margin: 0, color: "#f8fafc", fontSize: 28 };
 const mutedStyle = { margin: "6px 0 0", color: "#94a3b8" };
 const labelStyle = { display: "grid", gap: 8, color: "#cbd5e1", fontSize: 13 };
 const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
   background: "#0b1220",
   border: "1px solid #334155",
   color: "#f8fafc",
   borderRadius: 8,
-  padding: "11px 12px",
+  padding: "11px 58px 11px 12px",
+};
+const passwordButtonStyle = {
+  position: "absolute",
+  right: 8,
+  top: "50%",
+  transform: "translateY(-50%)",
+  border: 0,
+  background: "transparent",
+  color: "#93c5fd",
+  cursor: "pointer",
+  fontWeight: 700,
 };
 const buttonStyle = {
   background: "#2563eb",
