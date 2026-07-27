@@ -182,8 +182,21 @@ apiClient.interceptors.request.use((config) => {
 // ======================
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = error?.response?.status;
+    const config = error?.config;
+    const method = String(config?.method || "get").toLowerCase();
+    const retryableStatus = [502, 503, 504].includes(status);
+    const retryableNetworkError = !error?.response && ["ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT"].includes(error?.code);
+    if (config && method === "get" && (retryableStatus || retryableNetworkError)) {
+      config.__smartMHubRetryCount = Number(config.__smartMHubRetryCount || 0);
+      if (config.__smartMHubRetryCount < 2) {
+        config.__smartMHubRetryCount += 1;
+        const delayMs = config.__smartMHubRetryCount === 1 ? 400 : 1200;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return apiClient.request(config);
+      }
+    }
     const backendUrl = String(API || "");
     const publicFrontend =
       !["localhost", "127.0.0.1", ""].includes(window.location.hostname);

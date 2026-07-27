@@ -124,6 +124,7 @@ const Dashboard = () => {
   const [globalAnnouncements, setGlobalAnnouncements] = useState([]);
   const [supportNotices, setSupportNotices] = useState([]);
   const dashboardRequestInFlight = useRef(false);
+  const lastDashboardRequestAt = useRef(0);
 
   // =========================
 // SAFE USER
@@ -187,74 +188,45 @@ const isStudent =
   const fetchDashboardData =
     useCallback(async () => {
       if (dashboardRequestInFlight.current) return;
+      if (Date.now() - lastDashboardRequestAt.current < 15000) return;
       dashboardRequestInFlight.current = true;
+      lastDashboardRequestAt.current = Date.now();
       try {
         setLoading(true);
+        const wantsNotices = isSchoolAdmin || isFinance || isSecretary;
+        const [statsResult, announcementsResult, noticesResult, pendingResult] = await Promise.allSettled([
+          apiClient.get("/dashboard/stats"),
+          apiClient.get("/platform-announcements"),
+          wantsNotices ? apiClient.get("/support-notices") : Promise.resolve(null),
+          isAdmin ? apiClient.get("/admin/pending") : Promise.resolve(null),
+        ]);
 
-        // =========================
-        // DASHBOARD STATS
-        // =========================
-
-        try {
-          const statsRes =
-            await apiClient.get(
-              "/dashboard/stats"
-            );
-
-          setStats({
-            ...defaultStats,
-            ...(statsRes?.data || {}),
-          });
-        } catch (err) {
-          console.error(
-            "Stats error:",
-            err
-          );
-
+        if (statsResult.status === "fulfilled") {
+          setStats({ ...defaultStats, ...(statsResult.value?.data || {}) });
+        } else {
+          console.error("Stats error:", statsResult.reason);
           setStats(defaultStats);
         }
 
-        try {
-          const announcementsRes = await apiClient.get("/platform-announcements");
-          const data = announcementsRes?.data;
+        if (announcementsResult.status === "fulfilled") {
+          const data = announcementsResult.value?.data;
           setGlobalAnnouncements(Array.isArray(data) ? data : data?.announcements || []);
-        } catch {
+        } else {
           setGlobalAnnouncements([]);
         }
 
-        if (isSchoolAdmin || isFinance || isSecretary) {
-          try {
-            const noticesRes = await apiClient.get("/support-notices");
-            const data = noticesRes?.data;
-            setSupportNotices(Array.isArray(data) ? data : data?.data || []);
-          } catch {
-            setSupportNotices([]);
-          }
+        if (wantsNotices && noticesResult.status === "fulfilled") {
+          const data = noticesResult.value?.data;
+          setSupportNotices(Array.isArray(data) ? data : data?.data || []);
+        } else if (wantsNotices) {
+          setSupportNotices([]);
         }
 
-        // =========================
-        // ADMIN PENDING DATA
-        // =========================
-
-        if (isAdmin) {
-          try {
-            const res =
-              await apiClient.get(
-                "/admin/pending"
-              );
-
-            const data =
-              res?.data || {};
-
-            const nested =
-              data?.data || {};
-
-            const nestedUsers =
-              nested?.users || {};
-
-            const nestedOps =
-              nested?.operations || {};
-
+        if (isAdmin && pendingResult.status === "fulfilled") {
+            const data = pendingResult.value?.data || {};
+            const nested = data?.data || {};
+            const nestedUsers = nested?.users || {};
+            const nestedOps = nested?.operations || {};
             setPending({
               pending_users:
                 data.pending_users ||
@@ -310,18 +282,10 @@ const isStudent =
                   all_pending_operations: 0,
                 },
             });
-          } catch (err) {
-            console.error(
-              "Pending error:",
-              err
-            );
-
-            setPending(defaultPending);
-          }
+        } else if (isAdmin) {
+          console.error("Pending error:", pendingResult.reason);
+          setPending(defaultPending);
         } else {
-          // IMPORTANT:
-          // NON ADMINS SHOULD NEVER LOAD ADMIN DATA
-
           setPending(defaultPending);
         }
       } catch (error) {
@@ -357,7 +321,7 @@ const isStudent =
 
   const interval = isAdmin ? setInterval(() => {
     if (document.visibilityState === "visible") fetchDashboardData();
-  }, 30000) : null;
+  }, 60000) : null;
 
   const refreshWhenVisible = () => {
     if (document.visibilityState === "visible") fetchDashboardData();

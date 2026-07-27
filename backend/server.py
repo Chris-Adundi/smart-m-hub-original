@@ -6,7 +6,6 @@ from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
@@ -105,6 +104,7 @@ from services.report_artifacts import create_report_artifact_manifest
 from services.storage import StorageError, store_upload
 from feature_flags import ASYNC_BULK_REPORTS, ASYNC_NOTIFICATIONS
 from config import load_secret_file_env, validate_environment
+from database import client, db, DB_NAME
 from single_super_admin import is_canonical_super_admin, reconcile_single_super_admin
 from app.core.responses import api_success as shared_api_success
 from app.core.responses import error_code_for_status as shared_error_code_for_status
@@ -145,25 +145,7 @@ configure_logging()
 # DATABASE CONNECTION
 # =====================================================
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
-mongo_url = os.getenv("MONGO_URL")
-if not mongo_url:
-    if APP_ENV in {"production", "prod"}:
-        raise RuntimeError("MONGO_URL must be set in production")
-    mongo_url = "mongodb://localhost:27017"
-db_name = os.getenv("DB_NAME", "smart_m_hub")
-
-if not isinstance(db_name, str) or not db_name.strip():
-    raise ValueError("DB_NAME must be a valid string. Check your .env file.")
-
-client = AsyncIOMotorClient(
-    mongo_url,
-    maxPoolSize=int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
-    minPoolSize=int(os.getenv("MONGO_MIN_POOL_SIZE", "0")),
-    serverSelectionTimeoutMS=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")),
-    connectTimeoutMS=int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "10000")),
-    socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "20000")),
-)
-db = client[db_name]
+db_name = DB_NAME
 settings = get_settings()
 
 # =====================================================
@@ -286,7 +268,10 @@ async def add_security_headers(request: Request, call_next):
         )
     duration_ms = (time.perf_counter() - started_at) * 1000
     metrics.record_request(request.method, original_path or request.url.path, status_code, duration_ms)
-    logging.getLogger("smart_m_hub.requests").info(
+    request_logger = logging.getLogger("smart_m_hub.requests")
+    slow_request_ms = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "2000"))
+    log_request = request_logger.warning if duration_ms >= slow_request_ms or status_code >= 500 else request_logger.debug
+    log_request(
         "request_completed",
         extra={"event": {
             "event_type": "http_request",
@@ -2716,28 +2701,28 @@ async def get_pending_items(
     # =========================
     # USERS
     # =========================
-    pending_users = await db.users.find({
+    pending_users_query = db.users.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    approved_users = await db.users.find({
+    approved_users_query = db.users.find({
         **school_filter,
         "approval_status": "approved"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    rejected_users = await db.users.find({
+    rejected_users_query = db.users.find({
         **school_filter,
         "approval_status": "rejected"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    suspended_users = await db.users.find({
+    suspended_users_query = db.users.find({
         **school_filter,
         "$or": [
             {"is_suspended": True},
@@ -2751,60 +2736,90 @@ async def get_pending_items(
     # =========================
     # SCHOOL-SCOPED APPROVAL SOURCES
     # =========================
-    students = await db.students.find({
+    students_query = db.students.find({
         **school_filter,
         "approval_status": "pending"
     }).sort("created_at", -1).to_list(length=100)
 
-    results = await db.results.find({
+    results_query = db.results.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    attendance = await db.attendance.find({
+    attendance_query = db.attendance.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    payments = await db.payments.find({
+    payments_query = db.payments.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    announcements = await db.announcements.find({
+    announcements_query = db.announcements.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    inventory = await db.inventory.find({
+    inventory_query = db.inventory.find({
         **school_filter,
         "approval_status": "pending"
     }).sort(
         "created_at", -1
     ).to_list(length=100)
 
-    finance_transactions = await db.finance_transactions.find({
+    finance_transactions_query = db.finance_transactions.find({
         **school_filter,
         "approval_status": "pending"
     }).sort("created_at", -1).to_list(length=100)
 
-    fee_status_requests = await db.students.find({
+    fee_status_requests_query = db.students.find({
         **school_filter,
         "fee_status_approval_status": "pending"
     }).sort("updated_at", -1).to_list(length=100)
 
-    approval_requests = await db.approval_requests.find({
+    approval_requests_query = db.approval_requests.find({
         **school_filter,
         "status": "pending"
     }).sort("created_at", -1).to_list(length=100)
+
+    (
+        pending_users,
+        approved_users,
+        rejected_users,
+        suspended_users,
+        students,
+        results,
+        attendance,
+        payments,
+        announcements,
+        inventory,
+        finance_transactions,
+        fee_status_requests,
+        approval_requests,
+    ) = await asyncio.gather(
+        pending_users_query,
+        approved_users_query,
+        rejected_users_query,
+        suspended_users_query,
+        students_query,
+        results_query,
+        attendance_query,
+        payments_query,
+        announcements_query,
+        inventory_query,
+        finance_transactions_query,
+        fee_status_requests_query,
+        approval_requests_query,
+    )
 
     def approval_entry(item_type: str, item: dict) -> dict:
         item_id = str(item.get("id") or item.get("_id"))
@@ -9467,10 +9482,13 @@ async def ensure_database_indexes():
         (db.users, [("id", 1)], {"name": "users_id_idx"}),
         (db.users, [("school_id", 1), ("role", 1), ("status", 1)], {"name": "users_school_role_status_idx"}),
         (db.users, [("school_id", 1), ("approval_status", 1), ("role", 1)], {"name": "users_school_approval_role_idx"}),
+        (db.users, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "users_school_approval_created_idx"}),
         (db.students, [("school_id", 1), ("admission_number", 1)], {"name": "students_school_admission_idx"}),
         (db.students, [("school_id", 1), ("student_access_code", 1)], {"name": "students_school_access_code_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
         (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),
+        (db.students, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "students_school_approval_created_idx"}),
+        (db.students, [("school_id", 1), ("fee_status_approval_status", 1), ("updated_at", -1)], {"name": "students_school_fee_approval_updated_idx"}),
         (db.student_history, [("progression_key", 1)], {"unique": True, "sparse": True, "name": "unique_student_year_progression"}),
         (db.students, [("school_id", 1), ("guardian_email", 1)], {"name": "students_school_guardian_email_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("secondary_guardian_email", 1)], {"name": "students_school_secondary_guardian_email_idx", "sparse": True}),
@@ -9480,15 +9498,19 @@ async def ensure_database_indexes():
         (db.payments, [("school_id", 1), ("student_id", 1), ("approval_status", 1), ("visible_to_student", 1), ("created_at", -1)], {"name": "payments_portal_student_visibility_idx"}),
         (db.payments, [("school_id", 1), ("approval_status", 1), ("status", 1), ("created_at", -1)], {"name": "payments_school_approval_status_created_idx"}),
         (db.finance_transactions, [("school_id", 1), ("approval_status", 1), ("date", -1)], {"name": "finance_transactions_school_approval_date_idx"}),
+        (db.finance_transactions, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "finance_transactions_school_approval_created_idx"}),
         (db.attendance, [("school_id", 1), ("date", -1)], {"name": "attendance_school_date_idx"}),
         (db.attendance, [("school_id", 1), ("date", -1), ("class_name", 1)], {"name": "attendance_school_date_class_idx"}),
         (db.attendance, [("school_id", 1), ("student_id", 1), ("date", -1)], {"name": "attendance_school_student_date_idx"}),
         (db.attendance, [("school_id", 1), ("approval_status", 1), ("archived", 1), ("date", -1)], {"name": "attendance_school_approval_archive_date_idx"}),
+        (db.attendance, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "attendance_school_approval_created_idx"}),
         (db.attendance_summaries, [("school_id", 1), ("week", -1), ("status", 1)], {"name": "attendance_summary_school_week_status_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1)], {"name": "results_school_student_idx"}),
+        (db.results, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "results_school_approval_created_idx"}),
         (db.results, [("school_id", 1), ("student_id", 1), ("approval_status", 1), ("archived", 1), ("created_at", -1)], {"name": "results_portal_student_visibility_idx"}),
         (db.results, [("school_id", 1), ("exam_id", 1), ("student_id", 1)], {"name": "results_school_exam_student_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1)], {"name": "announcements_school_approval_idx"}),
+        (db.announcements, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "announcements_school_approval_created_idx"}),
         (db.announcements, [("school_id", 1), ("approval_status", 1), ("target_audience", 1), ("target_class", 1), ("created_at", -1)], {"name": "announcements_portal_audience_idx"}),
         (db.support_tickets, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "support_school_status_created_idx"}),
         (db.audit_logs, [("school_id", 1), ("timestamp", -1)], {"name": "audit_school_timestamp_idx"}),
@@ -9510,6 +9532,8 @@ async def ensure_database_indexes():
         (db.fee_structures, [("school_id", 1), ("class_name", 1)], {"name": "fee_structures_school_class_idx"}),
         (db.timetable, [("school_id", 1), ("class_name", 1), ("day_order", 1)], {"name": "timetable_school_class_day_idx"}),
         (db.inventory, [("school_id", 1), ("category", 1)], {"name": "inventory_school_category_idx"}),
+        (db.inventory, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "inventory_school_approval_created_idx"}),
+        (db.approval_requests, [("school_id", 1), ("status", 1), ("created_at", -1)], {"name": "approval_requests_school_status_created_idx"}),
         (db.assessment_templates, [("school_id", 1), ("class_name", 1), ("pathway", 1), ("is_active", 1)], {"name": "assessment_templates_lookup_idx"}),
         (db.assessment_reports, [("school_id", 1), ("student_id", 1), ("exam_id", 1), ("class_name", 1)], {"unique": True, "name": "assessment_reports_unique_student_exam_class_idx"}),
         (db.assessment_reports, [("school_id", 1), ("status", 1), ("updated_at", -1)], {"name": "assessment_reports_status_idx"}),
@@ -9556,6 +9580,14 @@ async def ensure_database_indexes():
 
 @app.on_event("startup")
 async def startup_tasks():
+    logger.warning(
+        "mongodb_pool_configured database=%s max_pool_size=%s min_pool_size=%s wait_queue_timeout_ms=%s max_idle_time_ms=%s",
+        db_name,
+        os.getenv("MONGO_MAX_POOL_SIZE", "50"),
+        os.getenv("MONGO_MIN_POOL_SIZE", "0"),
+        os.getenv("MONGO_WAIT_QUEUE_TIMEOUT_MS", "5000"),
+        os.getenv("MONGO_MAX_IDLE_TIME_MS", "60000"),
+    )
     logger.warning("startup_super_admin_reconciliation_invoked database=%s collection=users", db_name)
     result = await reconcile_single_super_admin(db, hash_password)
     reconciled = await db.users.find_one({"super_admin_guard": "singleton"})

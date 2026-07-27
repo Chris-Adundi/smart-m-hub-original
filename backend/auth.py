@@ -6,7 +6,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 
 import os
@@ -19,6 +18,7 @@ import secrets
 from dotenv import load_dotenv
 from pathlib import Path
 from config import load_secret_file_env, validate_environment
+from database import client, db
 from single_super_admin import is_canonical_super_admin
 
 ROOT_DIR = Path(__file__).parent
@@ -26,23 +26,7 @@ load_dotenv(ROOT_DIR / ".env")
 load_secret_file_env(["SECRET_KEY", "MONGO_URL", "SUPER_ADMIN_EMAIL", "SUPER_ADMIN_PASSWORD"])
 validate_environment()
 
-DB_NAME = os.getenv("DB_NAME", "smart_m_hub")
 APP_ENV = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
-MONGO_URL = os.getenv("MONGO_URL")
-if not MONGO_URL:
-    if APP_ENV in {"production", "prod"}:
-        raise RuntimeError("MONGO_URL must be set in production")
-    MONGO_URL = "mongodb://localhost:27017"
-
-client = AsyncIOMotorClient(
-    MONGO_URL,
-    maxPoolSize=int(os.getenv("MONGO_MAX_POOL_SIZE", "100")),
-    minPoolSize=int(os.getenv("MONGO_MIN_POOL_SIZE", "0")),
-    serverSelectionTimeoutMS=int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")),
-    connectTimeoutMS=int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "10000")),
-    socketTimeoutMS=int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "20000")),
-)
-db = client[DB_NAME]
 
 # =========================
 # SECURITY CONFIG

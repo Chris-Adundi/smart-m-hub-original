@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+import asyncio
 
 
 def _now():
@@ -11,22 +12,51 @@ def _now():
 async def rebuild_school_dashboard_summary(db: Any, school_id: str) -> dict:
     school_filter = {"school_id": str(school_id)}
     now = _now()
+    (
+        total_students,
+        total_teachers,
+        total_staff,
+        pending_users,
+        approved_users,
+        rejected_users,
+        suspended_users,
+        present_today,
+        pending_results,
+        pending_attendance,
+        pending_payments,
+        pending_announcements,
+        pending_inventory,
+    ) = await asyncio.gather(
+        db.students.count_documents(school_filter),
+        db.users.count_documents({**school_filter, "role": "teacher"}),
+        db.users.count_documents({**school_filter, "role": {"$in": ["teacher", "secretary", "finance", "supporting_staff"]}}),
+        db.users.count_documents({**school_filter, "approval_status": "pending"}),
+        db.users.count_documents({**school_filter, "approval_status": "approved"}),
+        db.users.count_documents({**school_filter, "approval_status": "rejected"}),
+        db.users.count_documents({**school_filter, "is_suspended": True}),
+        db.attendance.count_documents({**school_filter, "status": "present", "archived": {"$ne": True}}),
+        db.results.count_documents({**school_filter, "approval_status": "pending"}),
+        db.attendance.count_documents({**school_filter, "approval_status": "pending", "archived": {"$ne": True}}),
+        db.payments.count_documents({**school_filter, "approval_status": "pending"}),
+        db.announcements.count_documents({**school_filter, "approval_status": "pending"}),
+        db.inventory.count_documents({**school_filter, "approval_status": "pending"}),
+    )
     summary = {
         "id": f"dashboard:{school_id}",
         "school_id": str(school_id),
-        "total_students": await db.students.count_documents(school_filter),
-        "total_teachers": await db.users.count_documents({**school_filter, "role": "teacher"}),
-        "total_staff": await db.users.count_documents({**school_filter, "role": {"$in": ["teacher", "secretary", "finance", "supporting_staff"]}}),
-        "pending_users": await db.users.count_documents({**school_filter, "approval_status": "pending"}),
-        "approved_users": await db.users.count_documents({**school_filter, "approval_status": "approved"}),
-        "rejected_users": await db.users.count_documents({**school_filter, "approval_status": "rejected"}),
-        "suspended_users": await db.users.count_documents({**school_filter, "is_suspended": True}),
-        "present_today": await db.attendance.count_documents({**school_filter, "status": "present", "archived": {"$ne": True}}),
-        "pending_results": await db.results.count_documents({**school_filter, "approval_status": "pending"}),
-        "pending_attendance": await db.attendance.count_documents({**school_filter, "approval_status": "pending", "archived": {"$ne": True}}),
-        "pending_payments": await db.payments.count_documents({**school_filter, "approval_status": "pending"}),
-        "pending_announcements": await db.announcements.count_documents({**school_filter, "approval_status": "pending"}),
-        "pending_inventory": await db.inventory.count_documents({**school_filter, "approval_status": "pending"}),
+        "total_students": total_students,
+        "total_teachers": total_teachers,
+        "total_staff": total_staff,
+        "pending_users": pending_users,
+        "approved_users": approved_users,
+        "rejected_users": rejected_users,
+        "suspended_users": suspended_users,
+        "present_today": present_today,
+        "pending_results": pending_results,
+        "pending_attendance": pending_attendance,
+        "pending_payments": pending_payments,
+        "pending_announcements": pending_announcements,
+        "pending_inventory": pending_inventory,
         "updated_at": now,
     }
     summary["pending_operations"] = (

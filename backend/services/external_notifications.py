@@ -183,6 +183,7 @@ async def dispatch_notifications(
     email_provider = get_email_provider()
     sms_provider = get_sms_provider()
     seen = set()
+    deliveries = []
 
     for recipient in recipients:
         if str(recipient.get("school_id") or "") != str(school_id):
@@ -196,14 +197,21 @@ async def dispatch_notifications(
                 continue
             seen.add((channel, address))
             summary["total"] += 1
+            deliveries.append((recipient, channel, address))
+
+    concurrency = max(1, min(int(os.getenv("NOTIFICATION_SEND_CONCURRENCY", "10")), 25))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def deliver(recipient: dict, channel: str, address: str) -> dict:
             status = "sent"
             error = None
             provider_reference = None
             try:
-                if channel == "email":
-                    provider_reference = await email_provider.send(to=address, subject=title, text=message)
-                else:
-                    provider_reference = await sms_provider.send(to=address, text=f"{title}: {message}")
+                async with semaphore:
+                    if channel == "email":
+                        provider_reference = await email_provider.send(to=address, subject=title, text=message)
+                    else:
+                        provider_reference = await sms_provider.send(to=address, text=f"{title}: {message}")
                 summary["succeeded"] += 1
                 logger.info("notification_delivery_succeeded event=%s channel=%s school_id=%s", event_type, channel, school_id)
             except Exception as exc:
@@ -211,12 +219,15 @@ async def dispatch_notifications(
                 error = str(exc)[:300]
                 summary["failed"] += 1
                 logger.warning("notification_delivery_failed event=%s channel=%s school_id=%s reason=%s", event_type, channel, school_id, type(exc).__name__)
-            records.append({
+            return {
                 "id": str(uuid.uuid4()), "school_id": str(school_id), "event_type": event_type,
                 "recipient_id": recipient.get("id"), "channel": channel, "destination": address,
                 "status": status, "provider_reference": provider_reference, "error": error,
                 "requested_by": requested_by, "created_at": now_utc(), "updated_at": now_utc(),
-            })
+            }
+
+    if deliveries:
+        records = await asyncio.gather(*(deliver(recipient, channel, address) for recipient, channel, address in deliveries))
     if records:
         try:
             await db.notification_deliveries.insert_many(records)
