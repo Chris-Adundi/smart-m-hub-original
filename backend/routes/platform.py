@@ -1,5 +1,6 @@
 import calendar
 import asyncio
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from bson import ObjectId
 
 from auth import get_current_user, db, hash_password, validate_password_strength
+from services.external_notifications import (
+    dispatch_notifications,
+    normalize_email,
+    normalize_kenyan_phone,
+)
 
 
 router = APIRouter(prefix="/api/platform", tags=["Platform Admin"])
@@ -17,6 +23,28 @@ UPLOAD_ROOT = Path(__file__).resolve().parents[1] / "uploads"
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def notification_provider_status() -> dict:
+    email_provider = os.getenv("EMAIL_PROVIDER", "disabled").strip().lower()
+    sms_provider = os.getenv("SMS_PROVIDER", "disabled").strip().lower()
+    email_ready = bool(os.getenv("EMAIL_FROM")) and (
+        (email_provider == "smtp" and bool(os.getenv("SMTP_HOST")))
+        or (email_provider == "sendgrid" and bool(os.getenv("EMAIL_API_KEY")))
+    )
+    sms_ready = (
+        sms_provider in {"africastalking", "africas_talking"}
+        and bool(os.getenv("SMS_API_KEY"))
+        and bool(os.getenv("SMS_USERNAME"))
+    ) or (
+        sms_provider == "generic"
+        and bool(os.getenv("SMS_API_KEY"))
+        and bool(os.getenv("SMS_API_URL"))
+    )
+    return {
+        "email": {"provider": email_provider, "configured": email_ready},
+        "sms": {"provider": sms_provider, "configured": sms_ready},
+    }
 
 
 def school_lookup(school_id: str):
@@ -430,6 +458,40 @@ async def system_health(user=Depends(require_super_admin)):
     }
 
 
+@router.get("/notifications/status")
+async def notification_status(user=Depends(require_super_admin)):
+    return notification_provider_status()
+
+
+@router.post("/notifications/test")
+async def send_test_notification(data: dict, user=Depends(require_super_admin)):
+    email = normalize_email(data.get("email"))
+    phone = normalize_kenyan_phone(data.get("phone"))
+    if not email and not phone:
+        raise HTTPException(status_code=400, detail="A valid email address or Kenyan phone number is required")
+    channels = []
+    if email:
+        channels.append("email")
+    if phone:
+        channels.append("sms")
+    delivery = await dispatch_notifications(
+        db,
+        school_id="platform",
+        title="Smart M Hub notification test",
+        message="This is a delivery test from Smart M Hub. Email and SMS notifications are working when this message is received.",
+        recipients=[{
+            "id": user.get("user_id"),
+            "school_id": "platform",
+            "email": email,
+            "phone": phone,
+        }],
+        channels=channels,
+        event_type="platform_notification_test",
+        requested_by=user.get("user_id"),
+    )
+    return {"delivery": delivery, "providers": notification_provider_status()}
+
+
 @router.get("/schools")
 async def get_all_schools(
     page: int = 1,
@@ -675,6 +737,20 @@ async def approve_school(school_id: str, user=Depends(require_super_admin)):
         {"school_id": canonical_id, "invoice_type": "installation"},
         {"$set": {"status": "paid", "paid_at": now, "updated_at": now}}
     )
+    school_admins = await db.users.find(
+        {"school_id": canonical_id, "role": "school_admin"},
+        {"_id": 0},
+    ).to_list(100)
+    await dispatch_notifications(
+        db,
+        school_id=canonical_id,
+        title="Smart M Hub school approved",
+        message=f"{school.get('name') or 'Your school'} has been approved. Authorized users can now sign in.",
+        recipients=school_admins,
+        channels=["email", "sms"],
+        event_type="school_approved",
+        requested_by=user.get("user_id"),
+    )
     await log_action("school_approved", user, canonical_id)
     return {"message": "School and users approved successfully"}
 
@@ -702,6 +778,20 @@ async def reject_school(school_id: str, user=Depends(require_super_admin)):
     await db.users.update_many(
         {"school_id": canonical_id},
         {"$set": {"approval_status": "rejected", "is_active": False, "updated_at": now}}
+    )
+    school_admins = await db.users.find(
+        {"school_id": canonical_id, "role": "school_admin"},
+        {"_id": 0},
+    ).to_list(100)
+    await dispatch_notifications(
+        db,
+        school_id=canonical_id,
+        title="Smart M Hub school registration rejected",
+        message=f"{school.get('name') or 'Your school'} registration was rejected. Contact Smart M Hub support for assistance.",
+        recipients=school_admins,
+        channels=["email", "sms"],
+        event_type="school_rejected",
+        requested_by=user.get("user_id"),
     )
     await log_action("school_rejected", user, canonical_id)
     return {"message": "School registration rejected"}
@@ -747,12 +837,23 @@ async def reset_school_admin_password(school_id: str, data: dict, user=Depends(r
     if not password:
         raise HTTPException(status_code=400, detail="A new password is required")
     validate_password_strength(password)
+    school_admin = await db.users.find_one({"school_id": canonical_id, "role": "school_admin"})
     result = await db.users.update_one(
         {"school_id": canonical_id, "role": "school_admin"},
         {"$set": {"password_hash": hash_password(password), "temporary_password": password, "updated_at": now_iso()}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="School admin not found")
+    await dispatch_notifications(
+        db,
+        school_id=canonical_id,
+        title="Smart M Hub password changed",
+        message="Your Smart M Hub school administrator password was changed. If you did not expect this, contact Smart M Hub support immediately.",
+        recipients=[school_admin] if school_admin else [],
+        channels=["email", "sms"],
+        event_type="school_admin_password_changed",
+        requested_by=user.get("user_id"),
+    )
     await log_action("school_admin_password_reset", user, canonical_id)
     return {"message": "Password reset", "temporary_password": password}
 

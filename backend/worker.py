@@ -45,6 +45,21 @@ async def process_notification_delivery(server, job: dict) -> dict:
     return {"queued": True}
 
 
+async def process_external_notification_delivery(server, job: dict) -> dict:
+    payload = job.get("payload") or {}
+    return await server.dispatch_notifications(
+        server.db,
+        school_id=str(job.get("school_id") or ""),
+        title=str(payload.get("title") or "Smart M Hub notification"),
+        message=str(payload.get("message") or ""),
+        recipients=payload.get("recipients") or [],
+        channels=payload.get("channels") or [],
+        event_type=str(payload.get("event_type") or "external_notification"),
+        requested_by=job.get("requested_by"),
+        force_delivery=True,
+    )
+
+
 async def process_report_pdf(server, job: dict) -> dict:
     payload = job.get("payload") or {}
     await server.db.report_jobs.update_one(
@@ -67,6 +82,7 @@ async def handle_job(server, job: dict) -> None:
     handlers = {
         "bulk_generate_assessment_reports": process_bulk_generate,
         "notification_delivery": process_notification_delivery,
+        "external_notification_delivery": process_external_notification_delivery,
         "assessment_report_pdf": process_report_pdf,
         "webhook_delivery": process_webhook_delivery,
     }
@@ -81,7 +97,7 @@ async def run_once(server) -> bool:
     job = await claim_next_job(
         server.db,
         worker_id=WORKER_ID,
-        job_types=["bulk_generate_assessment_reports", "notification_delivery", "assessment_report_pdf", "webhook_delivery"],
+        job_types=["bulk_generate_assessment_reports", "notification_delivery", "external_notification_delivery", "assessment_report_pdf", "webhook_delivery"],
     )
     if not job:
         return False

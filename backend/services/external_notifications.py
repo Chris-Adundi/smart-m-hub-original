@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from typing import Any, Iterable, Optional
 
 import httpx
+from services.job_queue import enqueue_job
 
 
 logger = logging.getLogger("smart_m_hub.notifications")
@@ -176,9 +177,53 @@ async def dispatch_notifications(
     channels: Iterable[str],
     event_type: str,
     requested_by: Optional[str] = None,
+    force_delivery: bool = False,
 ) -> dict:
     selected_channels = [channel for channel in dict.fromkeys(channels) if channel in {"email", "sms"}]
     summary = {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0, "channels": selected_channels}
+    recipients = list(recipients)
+
+    direct_limit = max(1, int(os.getenv("NOTIFICATION_DIRECT_DELIVERY_LIMIT", "20")))
+    if not force_delivery and len(recipients) * max(len(selected_channels), 1) > direct_limit:
+        queued = 0
+        seen_addresses = set()
+        for channel in selected_channels:
+            channel_recipients = []
+            for recipient in recipients:
+                if str(recipient.get("school_id") or "") != str(school_id):
+                    summary["skipped"] += 1
+                    continue
+                address = normalize_email(recipient.get("email")) if channel == "email" else normalize_kenyan_phone(recipient.get("phone"))
+                if not address or (channel, address) in seen_addresses:
+                    summary["skipped"] += 1
+                    continue
+                seen_addresses.add((channel, address))
+                channel_recipients.append({
+                    "id": recipient.get("id"),
+                    "school_id": str(school_id),
+                    "email": address if channel == "email" else None,
+                    "phone": address if channel == "sms" else None,
+                })
+            for offset in range(0, len(channel_recipients), 100):
+                batch = channel_recipients[offset:offset + 100]
+                await enqueue_job(
+                    db,
+                    job_type="external_notification_delivery",
+                    school_id=str(school_id),
+                    payload={
+                        "title": title,
+                        "message": message,
+                        "recipients": batch,
+                        "channels": [channel],
+                        "event_type": event_type,
+                    },
+                    requested_by=requested_by,
+                )
+                queued += len(batch)
+        summary["total"] = queued
+        summary["queued"] = queued
+        return summary
+
     records = []
     email_provider = get_email_provider()
     sms_provider = get_sms_provider()
@@ -265,3 +310,40 @@ async def resolve_announcement_recipients(db: Any, *, school_id: str, announceme
             {"id": f"{student.get('id')}:guardian2", "school_id": school_id, "email": student.get("secondary_guardian_email"), "phone": student.get("secondary_guardian_phone")},
         ])
     return recipients
+
+
+def student_guardian_recipients(student: Optional[dict], *, school_id: str) -> list[dict]:
+    if not student:
+        return []
+    student_id = student.get("id") or student.get("_id")
+    return [
+        {
+            "id": f"{student_id}:guardian1",
+            "school_id": str(school_id),
+            "email": student.get("guardian_email"),
+            "phone": student.get("guardian_phone"),
+        },
+        {
+            "id": f"{student_id}:guardian2",
+            "school_id": str(school_id),
+            "email": student.get("secondary_guardian_email"),
+            "phone": student.get("secondary_guardian_phone"),
+        },
+    ]
+
+
+async def resolve_student_guardians(db: Any, *, school_id: str, item: Optional[dict]) -> list[dict]:
+    item = item or {}
+    if item.get("guardian_email") or item.get("guardian_phone") or item.get("secondary_guardian_email") or item.get("secondary_guardian_phone"):
+        return student_guardian_recipients(item, school_id=school_id)
+    student_id = item.get("student_id")
+    admission_number = item.get("admission_number")
+    conditions = []
+    if student_id:
+        conditions.append({"id": str(student_id)})
+    if admission_number:
+        conditions.append({"admission_number": str(admission_number)})
+    if not conditions:
+        return []
+    student = await db.students.find_one({"school_id": str(school_id), "$or": conditions})
+    return student_guardian_recipients(student, school_id=school_id)

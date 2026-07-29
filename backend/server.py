@@ -98,6 +98,8 @@ from services.notifications import queue_notification_batch
 from services.external_notifications import (
     dispatch_notifications,
     resolve_announcement_recipients,
+    resolve_student_guardians,
+    student_guardian_recipients,
 )
 from services.pdf_renderer import render_simple_report_pdf
 from services.report_artifacts import create_report_artifact_manifest
@@ -2411,6 +2413,7 @@ async def update_staff(
     update = payload.model_dump(exclude_unset=True)
     user_updates = {}
     staff_updates = {}
+    password_changed = bool(update.get("password"))
 
     if "email" in update and update["email"]:
         email = str(update["email"]).lower().strip()
@@ -2475,7 +2478,19 @@ async def update_staff(
             upsert=True
         )
     await log_security_event("staff_updated", current_user, {"staff_user_id": user_id})
-    return api_success(message="Staff member updated")
+    notification_delivery = None
+    if password_changed:
+        notification_delivery = await dispatch_notifications(
+            db,
+            school_id=str(school_id or ""),
+            title="Smart M Hub password changed",
+            message="Your Smart M Hub password was changed by your school administrator. If you did not expect this, contact the school immediately.",
+            recipients=[{**target, **user_updates}],
+            channels=["email", "sms"],
+            event_type="staff_password_changed",
+            requested_by=actor_id,
+        )
+    return api_success({"notification_delivery": notification_delivery}, message="Staff member updated")
 
 
 @api_router.patch("/staff/{user_id}/status")
@@ -2557,7 +2572,17 @@ async def reset_staff_password(
         }}
     )
     await log_security_event("staff_password_reset", current_user, {"staff_user_id": user_id})
-    return api_success(message="Staff password reset")
+    delivery = await dispatch_notifications(
+        db,
+        school_id=str(target.get("school_id") or ""),
+        title="Smart M Hub password changed",
+        message="Your school administrator changed your Smart M Hub password. If you did not expect this, contact the school immediately.",
+        recipients=[target],
+        channels=["email", "sms"],
+        event_type="staff_password_changed",
+        requested_by=current_user.get("user_id") or current_user.get("id"),
+    )
+    return api_success({"notification_delivery": delivery}, message="Staff password reset")
 
 
 @api_router.get("/staff/password-reset-requests")
@@ -2627,7 +2652,17 @@ async def complete_staff_password_reset_request(
         {"$set": {"revoked": True, "revoked_at": now, "updated_at": now}},
     )
     await log_security_event("staff_password_reset_request_completed", current_user, {"request_id": request_id, "staff_user_id": target.get("id")})
-    return api_success(message="Staff password reset request completed")
+    delivery = await dispatch_notifications(
+        db,
+        school_id=str(target.get("school_id") or ""),
+        title="Smart M Hub password changed",
+        message="Your Smart M Hub password reset request was completed. If you did not request this, contact the school immediately.",
+        recipients=[target],
+        channels=["email", "sms"],
+        event_type="staff_password_reset_completed",
+        requested_by=current_user.get("user_id") or current_user.get("id"),
+    )
+    return api_success({"notification_delivery": delivery}, message="Staff password reset request completed")
 
 
 @api_router.delete("/staff/{user_id}")
@@ -3128,6 +3163,30 @@ async def approve_item(
             recipients=recipients,
             channels=updated_item.get("notification_channels") or [],
             event_type="school_announcement",
+            requested_by=user_id,
+        )
+        await collection.update_one(query, {"$set": {"notification_delivery": notification_summary}})
+    elif item_type in {"students", "results", "payments"}:
+        notification_school_id = str(updated_item.get("school_id") or school_id or "")
+        recipients = await resolve_student_guardians(
+            db,
+            school_id=notification_school_id,
+            item=updated_item,
+        )
+        subject_labels = {
+            "students": "Student information",
+            "results": "Student results",
+            "payments": "Fee payment receipt",
+        }
+        visibility = "is now available in the Parent/Student Portal" if action == "approved" else "was not approved"
+        notification_summary = await dispatch_notifications(
+            db,
+            school_id=notification_school_id,
+            title=f"{subject_labels[item_type]} {action}",
+            message=f"{subject_labels[item_type]} {visibility}. Sign in to Smart M Hub for details.",
+            recipients=recipients,
+            channels=["email", "sms"],
+            event_type=f"{item_type}_approval_decision",
             requested_by=user_id,
         )
         await collection.update_one(query, {"$set": {"notification_delivery": notification_summary}})
@@ -3869,6 +3928,7 @@ async def register_parent(request: ParentRegistrationRequest, http_request: Requ
     full_name = (
         student.get("guardian_name") if is_primary else student.get("secondary_guardian_name")
     ) or "Parent/Guardian"
+    phone = student.get("guardian_phone") if is_primary else student.get("secondary_guardian_phone")
     now = now_utc()
     user = {
         "id": str(uuid.uuid4()),
@@ -3876,6 +3936,7 @@ async def register_parent(request: ParentRegistrationRequest, http_request: Requ
         "school_name": school.get("name"),
         "school_fingerprint": school.get("fingerprint"),
         "email": email,
+        "phone": phone,
         "full_name": full_name,
         "password_hash": hash_password(request.password),
         "role": "parent",
@@ -3903,7 +3964,7 @@ async def register_parent(request: ParentRegistrationRequest, http_request: Requ
         title="Smart M Hub parent account created",
         message=f"Your parent or guardian account for {school.get('name') or 'the school'} was created successfully. You can now sign in.",
         recipients=[user],
-        channels=["email"],
+        channels=["email", "sms"],
         event_type="parent_registration",
         requested_by=user.get("id"),
     )
@@ -4068,7 +4129,7 @@ async def join_school(payload: dict, http_request: Request):
             title="New Join School request",
             message=f"{full_name} requested access as {role}. Review this request in Pending Approvals.",
             recipients=school_admins,
-            channels=["email"],
+            channels=["email", "sms"],
             event_type="join_school_request_submitted",
             requested_by=user["id"],
         )
@@ -4489,6 +4550,22 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         return {"success": True, "message": "If the account exists, a verification code has been sent."}
 
     phone = str(user.get("phone") or user.get("phone_number") or "").strip()
+    notification_recipient = dict(user)
+    if not phone and normalize_role(user.get("role")) in {"parent", "student"} and user.get("school_id"):
+        linked_student = await db.students.find_one({
+            "school_id": str(user.get("school_id")),
+            "$or": [
+                {"id": str(user.get("student_id"))} if user.get("student_id") else {"id": "__missing__"},
+                {"guardian_email": email},
+                {"secondary_guardian_email": email},
+            ],
+        })
+        if linked_student:
+            if email == str(linked_student.get("guardian_email") or "").strip().lower():
+                phone = str(linked_student.get("guardian_phone") or "").strip()
+            elif email == str(linked_student.get("secondary_guardian_email") or "").strip().lower():
+                phone = str(linked_student.get("secondary_guardian_phone") or "").strip()
+            notification_recipient["phone"] = phone
 
     code = generate_verification_code()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -4513,7 +4590,7 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         school_id=str(user.get("school_id") or ""),
         title="Smart M Hub password reset",
         message=f"Your password reset verification code is {code}. It expires in 15 minutes. If you did not request this, contact your school administrator.",
-        recipients=[user],
+        recipients=[notification_recipient],
         channels=["email", "sms"],
         event_type="password_reset",
         requested_by=user.get("id"),
@@ -4579,7 +4656,17 @@ async def reset_password_with_code(request: VerifyResetCodeRequest, http_request
         {"$set": {"used": True, "updated_at": now_iso()}}
     )
     await log_security_event("password_reset_completed", user)
-    return {"success": True, "message": "Password reset. You can now sign in with the new password."}
+    delivery = await dispatch_notifications(
+        db,
+        school_id=str(user.get("school_id") or ""),
+        title="Smart M Hub password changed",
+        message="Your Smart M Hub password was changed successfully. If you did not make this change, contact your school administrator immediately.",
+        recipients=[user],
+        channels=["email", "sms"],
+        event_type="password_reset_completed",
+        requested_by=user.get("id"),
+    )
+    return {"success": True, "message": "Password reset. You can now sign in with the new password.", "notification_delivery": delivery}
 
 # =========================================
 # SCHOOL INVITE + UNIQUE LINKS
@@ -5692,7 +5779,7 @@ async def initiate_payment(
             title="School fee payment receipt",
             message=f"Payment {payment.get('receipt_number')} for KES {payment.get('amount')} was recorded with status {payment.get('status')}.",
             recipients=payment_recipients,
-            channels=["email"],
+            channels=["email", "sms"],
             event_type="fee_payment_receipt",
             requested_by=user_id,
         )
@@ -6674,6 +6761,21 @@ async def publish_assessment_report(
         requested_by=actor_id,
         async_delivery=ASYNC_NOTIFICATIONS,
     )
+    guardian_recipients = await resolve_student_guardians(
+        db,
+        school_id=str(report["school_id"]),
+        item=report,
+    )
+    delivery = await dispatch_notifications(
+        db,
+        school_id=str(report["school_id"]),
+        title="Student report published",
+        message=f"{report.get('exam_name') or 'A student assessment'} report is now available in the Parent/Student Portal.",
+        recipients=guardian_recipients,
+        channels=["email", "sms"],
+        event_type="assessment_report_published",
+        requested_by=actor_id,
+    )
     await record_event(
         db,
         event_type="assessment_report_published",
@@ -6683,7 +6785,7 @@ async def publish_assessment_report(
         entity_id=report_id,
         payload={"student_id": report.get("student_id"), "exam_id": report.get("exam_id")},
     )
-    return api_success(message="Report published")
+    return api_success({"notification_delivery": delivery}, message="Report published")
 
 
 @api_router.post("/assessments/reports/{report_id}/archive")
@@ -6806,6 +6908,10 @@ async def bulk_publish_assessment_reports(
     query = {"school_id": school_id, "exam_id": exam_id, "status": {"$in": ["approved", "submitted"]}}
     if class_name:
         query["class_name"] = class_name
+    reports_to_publish = await db.assessment_reports.find(
+        query,
+        {"_id": 0, "student_id": 1},
+    ).to_list(5000)
     result = await db.assessment_reports.update_many(
         query,
         {
@@ -6818,7 +6924,27 @@ async def bulk_publish_assessment_reports(
             "$push": {"history": report_history_event("bulk_published", current_user)},
         },
     )
-    return api_success({"published": result.modified_count}, message="Reports published")
+    student_ids = list({str(report.get("student_id")) for report in reports_to_publish if report.get("student_id")})
+    students = await db.students.find(
+        {"school_id": school_id, "id": {"$in": student_ids}},
+        {"_id": 0},
+    ).to_list(5000) if student_ids else []
+    guardian_recipients = [
+        recipient
+        for student in students
+        for recipient in student_guardian_recipients(student, school_id=school_id)
+    ]
+    delivery = await dispatch_notifications(
+        db,
+        school_id=school_id,
+        title="Student reports published",
+        message="New student assessment results are available in the Parent/Student Portal.",
+        recipients=guardian_recipients,
+        channels=["email", "sms"],
+        event_type="assessment_reports_bulk_published",
+        requested_by=current_user.get("user_id") or current_user.get("id"),
+    )
+    return api_success({"published": result.modified_count, "notification_delivery": delivery}, message="Reports published")
 
 
 @api_router.post("/assessments/reports/promote")
