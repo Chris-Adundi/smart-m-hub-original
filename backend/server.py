@@ -4267,15 +4267,6 @@ async def login(request: LoginRequest, http_request: Request):
                     await log_security_event("login_blocked", user, {"reason": "subscription_inactive", "school_id": school_id})
                     raise HTTPException(status_code=403, detail="School subscription is not active")
 
-        await clear_login_failures(email, school_code)
-
-        await db.users.update_one(
-            {"id": user_id},
-            {"$set": {"last_login": now_iso(), "updated_at": now_iso()}}
-        )
-
-        await log_security_event("login_success", user, {"school_id": school_id, "role": db_role})
-
         session_id = str(uuid.uuid4())
         token = create_access_token({
             "user_id": user_id,
@@ -4293,7 +4284,7 @@ async def login(request: LoginRequest, http_request: Request):
         })
         refresh_payload = decode_refresh_token(refresh_token) or {}
         refresh_expires_at = datetime.fromtimestamp(refresh_payload.get("exp"), timezone.utc) if refresh_payload.get("exp") else now_utc() + timedelta(days=14)
-        await db.auth_sessions.insert_one({
+        session_record = {
             "id": session_id,
             "user_id": user_id,
             "school_id": school_id,
@@ -4303,7 +4294,17 @@ async def login(request: LoginRequest, http_request: Request):
             "expires_at": refresh_expires_at,
             "created_at": now_utc(),
             "updated_at": now_utc(),
-        })
+        }
+        timestamp = now_iso()
+        await asyncio.gather(
+            clear_login_failures(email, school_code),
+            db.users.update_one(
+                {"id": user_id},
+                {"$set": {"last_login": timestamp, "updated_at": timestamp}},
+            ),
+            log_security_event("login_success", user, {"school_id": school_id, "role": db_role}),
+            db.auth_sessions.insert_one(session_record),
+        )
 
         return {
             "success": True,

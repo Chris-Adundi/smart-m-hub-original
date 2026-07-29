@@ -1,5 +1,5 @@
 import axios from "axios";
-import { logout } from "../auth/superAdminAuth";
+import { getCurrentUser, getRefreshToken, logout, saveSession } from "../auth/superAdminAuth";
 
 const resolveApiBaseUrl = () => {
   const configured = import.meta.env.VITE_API_BASE_URL;
@@ -11,6 +11,8 @@ const resolveApiBaseUrl = () => {
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
+const API_ROOT = API_BASE_URL.replace(/\/platform\/?$/, "");
+let refreshRequest = null;
 
 const getAuthToken = () =>
   localStorage.getItem("smart_m_hub_token") ||
@@ -39,12 +41,40 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const message =
       error?.response?.data?.detail ||
       error?.response?.data?.message ||
       error?.message ||
       "An unexpected error occurred";
+
+    const config = error?.config;
+    const requestUrl = String(config?.url || "");
+    if (error?.response?.status === 401 && config && !config.__smartMHubAuthRetry && !requestUrl.includes("/auth/refresh") && getRefreshToken()) {
+      config.__smartMHubAuthRetry = true;
+      try {
+        if (!refreshRequest) {
+          refreshRequest = axios.post(
+            `${API_ROOT}/auth/refresh`,
+            { refresh_token: getRefreshToken() },
+            { timeout: 30000 }
+          ).finally(() => {
+            refreshRequest = null;
+          });
+        }
+        const refreshResponse = await refreshRequest;
+        const nextToken = refreshResponse?.data?.access_token;
+        if (!nextToken) throw new Error("Authentication refresh did not return an access token");
+        saveSession(nextToken, getCurrentUser(), refreshResponse?.data?.refresh_token);
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${nextToken}`;
+        return api.request(config);
+      } catch (refreshError) {
+        logout();
+        if (window.location.pathname !== "/login") window.location.replace("/login");
+        return Promise.reject(refreshError);
+      }
+    }
 
     if ([401, 403].includes(error?.response?.status)) {
       logout();

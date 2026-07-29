@@ -108,6 +108,7 @@ export const formatApiError = (error, fallback = "Something went wrong") => {
 
 const TOKEN_KEY = "smart_m_hub_token";
 const USER_KEY = "smart_m_hub_user";
+const REFRESH_TOKEN_KEY = "smart_m_hub_refresh_token";
 
 export const authService = {
   getToken: () => localStorage.getItem(TOKEN_KEY),
@@ -128,7 +129,7 @@ export const authService = {
     }
   },
 
-  setAuth: (token, user) => {
+  setAuth: (token, user, refreshToken) => {
     if (!token || !user) return;
 
     const safeUser = {
@@ -138,11 +139,15 @@ export const authService = {
 
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
+    if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   },
+
+  getRefreshToken: () => localStorage.getItem(REFRESH_TOKEN_KEY),
 
   clearAuth: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   },
 
   isAuthenticated: () => {
@@ -157,6 +162,8 @@ export const apiClient = axios.create({
   baseURL: API,
   timeout: 30000,
 });
+
+let refreshRequest = null;
 
 // ======================
 // REQUEST INTERCEPTOR (ONLY ONE)
@@ -185,6 +192,35 @@ apiClient.interceptors.response.use(
   async (error) => {
     const status = error?.response?.status;
     const config = error?.config;
+    const requestUrl = String(config?.url || "");
+    const isAuthRequest = requestUrl.includes("/auth/login") || requestUrl.includes("/auth/refresh");
+
+    if (status === 401 && config && !config.__smartMHubAuthRetry && !isAuthRequest && authService.getRefreshToken()) {
+      config.__smartMHubAuthRetry = true;
+      try {
+        if (!refreshRequest) {
+          refreshRequest = axios.post(
+            `${API}/auth/refresh`,
+            { refresh_token: authService.getRefreshToken() },
+            { timeout: 30000 }
+          ).finally(() => {
+            refreshRequest = null;
+          });
+        }
+        const refreshResponse = await refreshRequest;
+        const nextToken = refreshResponse?.data?.access_token;
+        if (!nextToken) throw new Error("Authentication refresh did not return an access token");
+        authService.setAuth(nextToken, authService.getUser(), refreshResponse?.data?.refresh_token);
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${nextToken}`;
+        return apiClient.request(config);
+      } catch (refreshError) {
+        authService.clearAuth();
+        if (window.location.pathname !== "/") window.location.replace("/");
+        return Promise.reject(refreshError);
+      }
+    }
+
     const method = String(config?.method || "get").toLowerCase();
     const retryableStatus = [502, 503, 504].includes(status);
     const retryableNetworkError = !error?.response && ["ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT"].includes(error?.code);

@@ -512,7 +512,8 @@ const selectedRoleData = roles.find(
 
       authService.setAuth(
         String(token),
-        safeUser
+        safeUser,
+        responseData.refresh_token
       );
 
       // ========================================

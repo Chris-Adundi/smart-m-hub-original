@@ -53,7 +53,7 @@ export default function Login() {
         return;
       }
 
-      saveSession(data.access_token, data.user);
+      saveSession(data.access_token, data.user, data.refresh_token);
       navigate("/", { replace: true });
     } catch (err) {
       setError(

@@ -4,6 +4,7 @@
 
 const TOKEN_KEY = "smart_m_hub_token";
 const USER_KEY = "smart_m_hub_user";
+const REFRESH_TOKEN_KEY = "smart_m_hub_refresh_token";
 
 // =========================
 // SAFE PARSE
@@ -55,7 +56,7 @@ function normalizeRole(role) {
 // AUTH SERVICE
 // =========================
 export const authService = {
-  setAuth(token, user) {
+  setAuth(token, user, refreshToken) {
     if (!token || !user) return;
 
     if (token === "undefined" || token === "null") return;
@@ -75,6 +76,7 @@ export const authService = {
 
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
+    if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   },
 
   getToken() {
@@ -92,6 +94,10 @@ export const authService = {
     return raw ? safeParse(raw) : null;
   },
 
+  getRefreshToken() {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  },
+
   isAuthenticated() {
     return !!this.getToken();
   },
@@ -99,6 +105,7 @@ export const authService = {
   clearAuth() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   },
 
   getRole() {

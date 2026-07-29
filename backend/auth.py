@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 from pymongo import ReturnDocument
 
 import os
+import asyncio
 import re
 import secrets
 
@@ -353,12 +354,28 @@ async def get_current_user(
             detail="Role mismatch"
         )
 
-    if session_id:
-        session = await db.auth_sessions.find_one({
+    db_school_id = user.get("school_id")
+    session_lookup = (
+        db.auth_sessions.find_one({
             "id": str(session_id),
             "user_id": str(user.get("id") or user.get("_id")),
             "revoked": {"$ne": True},
         })
+        if session_id
+        else asyncio.sleep(0, result=None)
+    )
+    school_lookup = (
+        db.schools.find_one({"id": str(db_school_id)})
+        if db_role != "super_admin" and db_school_id
+        else asyncio.sleep(0, result=None)
+    )
+    session, platform_settings, school = await asyncio.gather(
+        session_lookup,
+        db.platform_settings.find_one({}, {"_id": 0}),
+        school_lookup,
+    )
+
+    if session_id:
         expires_at = session.get("expires_at") if session else None
         if isinstance(expires_at, str):
             expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
@@ -367,15 +384,13 @@ async def get_current_user(
         if not session or (expires_at and expires_at < now_utc()):
             raise HTTPException(status_code=401, detail="Session has expired")
 
-    platform_settings = await db.platform_settings.find_one({}, {"_id": 0}) or {}
+    platform_settings = platform_settings or {}
     if platform_settings.get("maintenance_mode") is True and db_role != "super_admin":
         raise HTTPException(status_code=503, detail="Platform is in maintenance mode")
 
     # =========================
     # FIX #2: SCHOOL ISOLATION SAFETY
     # =========================
-    db_school_id = user.get("school_id")
-
     if db_role != "super_admin":
 
         if not school_id or not db_school_id:
@@ -390,7 +405,6 @@ async def get_current_user(
                 detail="School access denied"
             )
 
-        school = await db.schools.find_one({"id": str(db_school_id)})
         if not school:
             raise HTTPException(status_code=403, detail="School not found")
 

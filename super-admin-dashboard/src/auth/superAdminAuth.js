@@ -16,11 +16,16 @@ return null;
 }
 }
 
-export function saveSession(token, user) {
+export function saveSession(token, user, refreshToken) {
 localStorage.setItem("smart_m_hub_token", token);
 localStorage.setItem("access_token", token);
 localStorage.setItem("smart_m_hub_user", JSON.stringify(user));
 localStorage.setItem("current_user", JSON.stringify(user));
+if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+}
+
+export function getRefreshToken() {
+return localStorage.getItem("refresh_token");
 }
 
 export function isAuthenticated() {
