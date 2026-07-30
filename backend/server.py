@@ -619,6 +619,11 @@ async def generate_admission_number(school_id: str) -> str:
     return f"ADM-{int(counter['sequence']):05d}"
 
 
+def is_not_applicable_identifier(value: Any) -> bool:
+    """Treat NA as a reusable placeholder, never as a unique identity."""
+    return str(value or "").strip().upper() == "NA"
+
+
 async def generate_student_access_code(school_id: str) -> str:
     alphabet = string.ascii_uppercase + string.digits
     for _ in range(10):
@@ -1436,6 +1441,7 @@ class CreateStaffPayload(BaseModel):
     account_status: Optional[str] = "active"
     salary: Optional[float] = None
     joined_date: Optional[str] = None
+    selected_classes: Optional[List[str]] = None
 
 
 class UpdateStaffPayload(BaseModel):
@@ -1453,6 +1459,7 @@ class UpdateStaffPayload(BaseModel):
     salary: Optional[float] = None
     joined_date: Optional[str] = None
     account_status: Optional[str] = None
+    selected_classes: Optional[List[str]] = None
 
 
 # =========================
@@ -2253,13 +2260,27 @@ async def create_staff(
     if existing:
         raise HTTPException(status_code=400, detail="Staff email already exists")
 
-    employee_existing = await db.staff.find_one({
-        "school_id": school_id,
-        "employee_number": payload.employee_number
-    })
+    employee_number = str(payload.employee_number or "").strip()
+    employee_existing = None
+    if not is_not_applicable_identifier(employee_number):
+        employee_existing = await db.staff.find_one({
+            "school_id": school_id,
+            "employee_number": employee_number
+        })
 
     if employee_existing:
         raise HTTPException(status_code=400, detail="Employee number already exists")
+
+    selected_classes = []
+    if staff_role == "teacher":
+        available_classes = set(GRADE_ORDER)
+        available_classes.update(await db.students.distinct(
+            "class_name", {"school_id": school_id, "class_name": {"$nin": [None, ""]}}
+        ))
+        selected_classes = sorted({str(item).strip() for item in (payload.selected_classes or []) if str(item).strip()})
+        invalid_classes = [name for name in selected_classes if name not in available_classes]
+        if invalid_classes:
+            raise HTTPException(status_code=400, detail=f"Unknown class for this school: {', '.join(invalid_classes)}")
 
     now = now_utc()
     user_id = str(uuid.uuid4())
@@ -2282,6 +2303,7 @@ async def create_staff(
         "gender": payload.gender,
         "passport_photo_url": payload.passport_photo_url,
         "role": staff_role,
+        "selected_classes": selected_classes,
         "approval_status": "approved",
         "status": account_status,
         "is_active": is_active,
@@ -2297,7 +2319,7 @@ async def create_staff(
         "school_id": school_id,
         "school_code": school_code,
         "user_id": user_id,
-        "employee_number": payload.employee_number,
+        "employee_number": employee_number,
         "national_id": payload.national_id,
         "gender": payload.gender,
         "passport_photo_url": payload.passport_photo_url,
@@ -2423,6 +2445,8 @@ async def update_staff(
         user_updates["email"] = email
 
     if "employee_number" in update and update["employee_number"]:
+        update["employee_number"] = str(update["employee_number"]).strip()
+    if "employee_number" in update and update["employee_number"] and not is_not_applicable_identifier(update["employee_number"]):
         existing_employee = await db.staff.find_one({
             "school_id": school_id,
             "employee_number": update["employee_number"],
@@ -2437,6 +2461,19 @@ async def update_staff(
             raise HTTPException(status_code=400, detail="Invalid staff role")
         user_updates["role"] = staff_role
         staff_updates["role"] = staff_role
+
+    resulting_role = normalize_role(update.get("role") or target.get("role"))
+    if "selected_classes" in update or "role" in update:
+        requested_classes = update.get("selected_classes", target.get("selected_classes") or []) if resulting_role == "teacher" else []
+        available_classes = set(GRADE_ORDER)
+        available_classes.update(await db.students.distinct(
+            "class_name", {"school_id": school_id, "class_name": {"$nin": [None, ""]}}
+        ))
+        selected_classes = sorted({str(item).strip() for item in (requested_classes or []) if str(item).strip()})
+        invalid_classes = [name for name in selected_classes if name not in available_classes]
+        if invalid_classes:
+            raise HTTPException(status_code=400, detail=f"Unknown class for this school: {', '.join(invalid_classes)}")
+        user_updates["selected_classes"] = selected_classes
 
     if "password" in update and update["password"]:
         validate_password_strength(update["password"])
@@ -3040,7 +3077,9 @@ async def approve_item(
 
     collection = collection_map.get(item_type)
 
-    if not collection:
+    # Motor/PyMongo collections intentionally cannot be evaluated as booleans.
+    # An ordinary truthiness check raises at runtime and turns valid approvals into 500s.
+    if collection is None:
         raise HTTPException(
             status_code=400,
             detail="Invalid item type"
@@ -4277,6 +4316,8 @@ async def login(request: LoginRequest, http_request: Request):
 
         student_identifier = (request.student_access_code or "").strip().upper()
         admission_identifier = (request.admission_number or "").strip()
+        if is_not_applicable_identifier(admission_identifier):
+            admission_identifier = ""
         if db_role in {"student", "parent"} and (student_identifier or admission_identifier):
             student_conditions = []
             if user.get("student_id"):
@@ -5053,10 +5094,12 @@ async def create_student(
         if gender and gender not in {"male", "female"}:
             raise HTTPException(status_code=400, detail="Gender must be Male or Female")
 
-        existing_student = await db.students.find_one({
-            "school_id": school_id,
-            "admission_number": admission_number
-        })
+        existing_student = None
+        if not is_not_applicable_identifier(admission_number):
+            existing_student = await db.students.find_one({
+                "school_id": school_id,
+                "admission_number": admission_number
+            })
 
         if existing_student:
             raise HTTPException(
@@ -5075,7 +5118,8 @@ async def create_student(
             "school_id": school_id,
 
             "admission_number": admission_number,
-            "student_id": f"STU-{admission_number}",
+            # NA is a reusable display value, never an internal identity.
+            "student_id": f"STU-{str(uuid.uuid4()).split('-')[0].upper()}" if is_not_applicable_identifier(admission_number) else f"STU-{admission_number}",
             "student_access_code": student_access_code,
             "passport_photo_url": request.passport_photo_url,
             "full_name": request.full_name,

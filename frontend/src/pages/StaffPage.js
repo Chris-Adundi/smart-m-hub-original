@@ -50,6 +50,7 @@ const emptyForm = {
   confirm_password: "",
   salary: "",
   joined_date: "",
+  selected_classes: [],
 };
 
 const roleOptions = [
@@ -107,6 +108,14 @@ const StaffPage = () => {
   const [assignmentData, setAssignmentData] = useState({ teachers: [], classes: [] });
   const [assignmentTeacherId, setAssignmentTeacherId] = useState("");
   const [assignedClasses, setAssignedClasses] = useState([]);
+  const [classOptions, setClassOptions] = useState([]);
+
+  const fetchClassOptions = async () => {
+    const response = await apiClient.get("/admin/teacher-class-assignments");
+    const data = response?.data?.data || { teachers: [], classes: [] };
+    setClassOptions(Array.isArray(data.classes) ? data.classes : []);
+    return data;
+  };
 
   const fetchStaff = async () => {
     try {
@@ -124,8 +133,7 @@ const StaffPage = () => {
 
   const openAssignments = async () => {
     try {
-      const response = await apiClient.get("/admin/teacher-class-assignments");
-      const data = response?.data?.data || { teachers: [], classes: [] };
+      const data = await fetchClassOptions();
       setAssignmentData(data);
       setAssignmentTeacherId("");
       setAssignedClasses([]);
@@ -182,6 +190,7 @@ const StaffPage = () => {
     setEditingStaff(null);
     setFormData(emptyForm);
     setDialogOpen(true);
+    fetchClassOptions().catch(() => toast.error("Failed to load available classes"));
   };
 
   const openEditDialog = (member) => {
@@ -205,8 +214,10 @@ const StaffPage = () => {
       joined_date: member.joined_date ? String(member.joined_date).slice(0, 10) : "",
       password: "",
       confirm_password: "",
+      selected_classes: Array.isArray(member.selected_classes) ? member.selected_classes : [],
     });
     setDialogOpen(true);
+    fetchClassOptions().catch(() => toast.error("Failed to load available classes"));
   };
 
   const openProfile = (member) => {
@@ -384,6 +395,26 @@ const StaffPage = () => {
                 </div>
                 <Field label="Employment Date" type="date" value={formData.joined_date} onChange={(value) => updateField("joined_date", value)} />
                 <Field label="Salary" type="number" value={formData.salary} onChange={(value) => updateField("salary", value)} />
+                {formData.role === "teacher" && (
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>Classes Assigned to This Teacher</Label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 rounded-lg border p-3">
+                      {classOptions.map((className) => (
+                        <label key={className} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.selected_classes.includes(className)}
+                            onChange={(event) => updateField("selected_classes", event.target.checked
+                              ? [...formData.selected_classes, className]
+                              : formData.selected_classes.filter((item) => item !== className))}
+                          />
+                          <span>{className}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {classOptions.length === 0 && <p className="text-sm text-slate-500">No classes are currently available.</p>}
+                  </div>
+                )}
               </FormSection>
 
               <FormSection title="Authentication & Permissions">

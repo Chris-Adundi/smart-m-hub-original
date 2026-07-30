@@ -40,6 +40,9 @@ class Collection:
     def __init__(self, documents=None):
         self.documents = deepcopy(documents or [])
 
+    def __bool__(self):
+        raise NotImplementedError("Mongo collections do not implement truth-value testing")
+
     def find(self, query, *_args, **_kwargs):
         return Cursor([doc for doc in self.documents if matches(doc, query)])
 
@@ -122,6 +125,32 @@ def test_approving_join_request_updates_user_and_removes_it_from_pending(monkeyp
 
     pending = asyncio.run(server.get_pending_items(admin()))["data"]["approvals"]
     assert not any(item["item_id"] == "user-a" for item in pending)
+
+
+@pytest.mark.parametrize("item_type,item_id", [
+    ("results", "result-a"),
+    ("attendance", "attendance-a"),
+    ("payments", "payment-a"),
+    ("finance_transactions", "transaction-a"),
+    ("approval_requests", "request-a"),
+])
+def test_school_reports_approve_with_real_mongo_collection_semantics(monkeypatch, item_type, item_id):
+    database = ApprovalDatabase()
+    monkeypatch.setattr(server, "db", database)
+    monkeypatch.setattr(server, "log_security_event", AsyncMock())
+
+    result = asyncio.run(server.approve_item(
+        item_type, item_id, server.ApprovalActionRequest(action="approved"), admin()
+    ))
+
+    assert result["success"] is True
+    assert result["approval_status"] == "approved"
+
+
+def test_na_is_a_reusable_non_unique_identifier():
+    assert server.is_not_applicable_identifier("NA")
+    assert server.is_not_applicable_identifier(" na ")
+    assert not server.is_not_applicable_identifier("ADM-001")
 
 
 def test_school_admin_cannot_process_another_schools_request(monkeypatch):

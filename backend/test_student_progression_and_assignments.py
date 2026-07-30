@@ -116,6 +116,17 @@ def test_staff_payload_uses_designation_without_removed_fields():
     assert "staff_category" not in fields
     assert "department" not in fields
     assert "position" not in fields
+    assert fields["selected_classes"] is None
+
+    teacher = server.CreateStaffPayload(
+        full_name="Teacher Assigned",
+        email="assigned@example.com",
+        employee_number="NA",
+        designation="Teacher",
+        password="StrongPass123!",
+        selected_classes=["Grade 4", "Grade 5"],
+    )
+    assert teacher.selected_classes == ["Grade 4", "Grade 5"]
     try:
         server.CreateStaffPayload(
             full_name="Teacher Two",
