@@ -10,30 +10,45 @@ def _pdf_escape(value: object) -> str:
 def render_simple_report_pdf(report: dict) -> bytes:
     learner = report.get("learner_details") or {}
     school = report.get("school_details") or {}
+    generated_at = datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
+    teacher_name = report.get("teacher_name") or report.get("prepared_by_name") or ""
     lines = [
         school.get("name") or "Smart M Hub",
+        school.get("motto") or "",
         "CBC Assessment Report",
+        f"Report Date: {generated_at}",
+        "=" * 82,
         f"Learner: {learner.get('full_name') or ''}",
         f"Admission No: {learner.get('admission_number') or ''}",
         f"Class: {report.get('class_name') or learner.get('class_name') or ''}",
-        f"Exam: {report.get('exam_name') or ''}",
-        f"Term: {report.get('term') or ''}",
-        f"Academic Year: {report.get('academic_year') or ''}",
+        f"Assessment / Examination: {report.get('exam_name') or ''}",
+        f"Exam Number: {report.get('exam_number') or ''}",
+        f"Term: {report.get('term') or ''}    Academic Year: {report.get('academic_year') or ''}",
+        f"Class Teacher / Prepared By: {teacher_name}",
         f"Status: {report.get('status') or ''}",
-        f"Generated: {datetime.now(timezone.utc).isoformat()}",
         "",
-        "Learning Areas",
+        "LEARNING AREAS",
+        "-" * 82,
     ]
     for area in report.get("learning_areas") or []:
         lines.append(
-            f"- {area.get('name') or area.get('learning_area') or ''}: "
-            f"{area.get('overall_grade') or area.get('achievement_level') or ''}"
+            f"{area.get('name') or area.get('learning_area') or ''}: "
+            f"Score {area.get('score') if area.get('score') not in (None, '') else '-'} | "
+            f"Level {area.get('overall_grade') or area.get('achievement_level') or '-'} | "
+            f"Comment: {area.get('teacher_remarks') or '-'}"
         )
+    lines.extend([
+        "", f"Teacher's Comment: {report.get('teacher_remarks') or '-'}",
+        f"Principal's Comment: {report.get('principal_remarks') or '-'}", "",
+        f"Teacher's Name: {teacher_name or '-'}",
+        "Teacher's Signature: ____________________    Date: ____________________",
+        "Principal's Signature: ___________________    Official Stamp: __________",
+    ])
 
     content_lines = ["BT", "/F1 12 Tf", "50 560 Td"]
-    for index, line in enumerate(lines[:28]):
+    for index, line in enumerate(lines[:34]):
         if index:
-            content_lines.append("0 -18 Td")
+            content_lines.append("0 -15 Td")
         content_lines.append(f"({_pdf_escape(line)}) Tj")
     content_lines.append("ET")
     stream = "\n".join(content_lines).encode("utf-8")

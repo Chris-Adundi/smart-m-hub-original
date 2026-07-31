@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { apiClient, authService } from "@/App";
+import { API, apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 
@@ -49,6 +49,20 @@ const safeDate = (d) => {
     return "-";
   }
 };
+
+const imageDataUrl = (url) => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d").drawImage(image, 0, 0);
+    resolve(canvas.toDataURL("image/png"));
+  };
+  image.onerror = reject;
+  image.src = String(url || "").startsWith("/") ? `${API.replace(/\/api$/, "")}${url}` : url;
+});
 
 /* ---------------- GRADING ---------------- */
 const gradeColor = (g) => {
@@ -217,29 +231,74 @@ const StudentPortal = () => {
     popup.print();
   };
 
-  const downloadReceipt = (payment) => {
+  const downloadReceipt = async (payment) => {
     const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text("SMART M HUB - SCHOOL PAYMENT RECEIPT", 15, 18);
+    doc.setFillColor(15, 118, 110);
+    doc.rect(0, 0, 210, 34, "F");
+    if (payment?.school_logo) {
+      try {
+        const logo = await imageDataUrl(payment.school_logo);
+        doc.addImage(logo, 14, 6, 22, 22, undefined, "FAST");
+      } catch {
+        // A receipt must still download if an external logo host blocks browser access.
+      }
+    }
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(17);
+    doc.text(payment?.school_name || "Smart M Hub School", 42, 14);
     doc.setFontSize(11);
-    const lines = [
-      `School: ${payment?.school_name || "-"}`,
-      `School Code: ${payment?.school_code || "-"}`,
-      `Receipt Number: ${payment?.receipt_number || "-"}`,
-      `Receipt Date: ${safeDate(payment?.created_at)}`,
-      `Student: ${payment?.student_name || student?.full_name || "-"}`,
-      `Admission Number: ${payment?.admission_number || student?.admission_number || "-"}`,
-      `Received From: ${payment?.received_from || student?.guardian_name || "-"}`,
-      `Payment Method: ${payment?.payment_method || "-"}`,
-      `Transaction / Reference Number: ${payment?.transaction_reference || payment?.bank_reference || payment?.cheque_number || payment?.phone_number || "-"}`,
-      `Total Amount Due: KES ${safeNum(payment?.total_amount_due).toLocaleString()}`,
-      `Total Paid: KES ${safeNum(payment?.total_paid || payment?.amount).toLocaleString()}`,
-      `Outstanding Balance: KES ${safeNum(payment?.outstanding_balance ?? feeBalance).toLocaleString()}`,
-      `Received By: ${payment?.submitted_by || "-"}`,
-      `Approved By: ${payment?.approved_by || "-"}`,
-      `Official School Stamp: ${payment?.school_stamp ? "Uploaded" : "-"}`,
+    doc.text("OFFICIAL PAYMENT RECEIPT", 42, 23);
+    doc.setTextColor(17, 24, 39);
+
+    const rows = [
+      ["Receipt Number", payment?.receipt_number || "-"],
+      ["Complete Date", safeDate(payment?.approval_date || payment?.created_at)],
+      ["Student", payment?.student_name || student?.full_name || "-"],
+      ["Admission Number", payment?.admission_number || student?.admission_number || "-"],
+      ["Received From", payment?.received_from || student?.guardian_name || "-"],
+      ["Payment Item", String(payment?.payment_type || "-").replaceAll("_", " ")],
+      ["Amount Recorded", `KES ${safeNum(payment?.amount).toLocaleString()}`],
+      ["Term / Academic Year", `${payment?.term || "-"} / ${payment?.academic_year || "-"}`],
+      ["Payment Method", String(payment?.payment_method || "-").replaceAll("_", " ")],
+      ["M-Pesa / Transaction Reference", payment?.transaction_reference || payment?.phone_number || "-"],
+      ["Bank Reference", payment?.bank_reference || "-"],
+      ["Cheque Number", payment?.cheque_number || "-"],
+      ["Description", payment?.description || "-"],
     ];
-    lines.forEach((line, index) => doc.text(line, 15, 34 + index * 9));
+    let y = 42;
+    doc.setFontSize(10);
+    rows.forEach(([label, value], index) => {
+      if (index % 2 === 0) {
+        doc.setFillColor(241, 245, 249);
+        doc.rect(14, y - 5, 182, 8, "F");
+      }
+      doc.setFont(undefined, "bold");
+      doc.text(label, 17, y);
+      doc.setFont(undefined, "normal");
+      doc.text(String(value), 77, y);
+      y += 8;
+    });
+    y += 3;
+    doc.setFont(undefined, "bold");
+    doc.text("Payment Breakdown", 14, y);
+    y += 7;
+    (payment?.payment_breakdown || []).forEach((item) => {
+      doc.setFont(undefined, "normal");
+      doc.text(`${item.item || payment?.payment_type || "Payment"} | ${item.term || payment?.term || "-"}`, 17, y);
+      doc.text(`KES ${safeNum(item.amount).toLocaleString()}`, 150, y);
+      y += 7;
+    });
+    doc.setDrawColor(15, 118, 110);
+    doc.line(14, y, 196, y);
+    y += 8;
+    doc.setFont(undefined, "bold");
+    doc.text(`Total Amount Due: KES ${safeNum(payment?.total_amount_due).toLocaleString()}`, 14, y);
+    doc.text(`Total Paid: KES ${safeNum(payment?.total_paid || payment?.amount).toLocaleString()}`, 14, y + 8);
+    doc.text(`Outstanding Balance: KES ${safeNum(payment?.outstanding_balance ?? feeBalance).toLocaleString()}`, 14, y + 16);
+    doc.setFont(undefined, "normal");
+    doc.text("Received By: ____________________", 14, y + 35);
+    doc.text("Approved By: ____________________", 112, y + 35);
+    doc.text("Official School Stamp", 14, y + 49);
     doc.save(`${payment?.receipt_number || "receipt"}.pdf`);
   };
 

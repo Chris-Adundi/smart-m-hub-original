@@ -71,8 +71,8 @@ export default function Payments() {
   }
 
   const cards = [
-    ["Installation Fees", formatKes(data.installation_fees), "All setup invoices raised"],
-    ["Monthly Subscriptions", formatKes(data.monthly_subscriptions), "Subscription invoices raised"],
+    ["Installation Fees", formatKes(data.installation_fees), "KES 5,000 one-time registration charge"],
+    ["Monthly Subscriptions", formatKes(data.monthly_subscriptions), "KES 2,000 monthly from registration date"],
     ["Pending Payments", Number(data.pending_payments || 0).toLocaleString(), "Invoices awaiting payment"],
     ["Overdue Schools", Number(data.overdue_schools || 0).toLocaleString(), "Schools disabled by billing"],
     ["Total Revenue", formatKes(data.totalRevenue), "Paid platform revenue"],
@@ -86,7 +86,7 @@ export default function Payments() {
       <div style={headerStyle}>
         <div>
           <h1 style={titleStyle}>Payments</h1>
-          <p style={subtitleStyle}>Installation fees, monthly subscriptions, overdue schools and platform payment history.</p>
+          <p style={subtitleStyle}>KES 5,000 is charged once when a school registers. KES 2,000 is then charged monthly from its registration date.</p>
         </div>
         <div style={actionsStyle}>
           <button type="button" style={secondaryButtonStyle} onClick={exportInvoices} disabled={!invoices.length}>Export CSV</button>

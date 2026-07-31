@@ -732,6 +732,17 @@ const isStudent =
         </Card>
       )}
 
+      {isSchoolAdmin && (
+        <Card className="border-emerald-500/25 bg-emerald-500/10">
+          <CardContent className="p-5">
+            <h3 className="font-semibold text-white">Smart M Hub School Charges</h3>
+            <p className="mt-2 text-sm text-slate-200">
+              KES 5,000 is a one-time charge during school registration. Thereafter, KES 2,000 is charged monthly from the school's registration date.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ROLE CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 

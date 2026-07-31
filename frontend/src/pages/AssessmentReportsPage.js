@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiClient, authService } from "@/App";
+import { API, apiClient, authService } from "@/App";
 import CbcReportSummaryCards from "@/features/cbc/CbcReportSummaryCards";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -26,6 +26,20 @@ import { CheckCircle2, Download, Eye, FileText, Send, Upload } from "lucide-reac
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const payloadList = (payload) => (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : []);
+
+const reportImageDataUrl = (url) => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d").drawImage(image, 0, 0);
+    resolve(canvas.toDataURL("image/png"));
+  };
+  image.onerror = reject;
+  image.src = String(url || "").startsWith("/") ? `${API.replace(/\/api$/, "")}${url}` : url;
+});
 
 const statusTone = {
   draft: "bg-slate-500/15 text-slate-200 border-slate-500/20",
@@ -126,6 +140,7 @@ const AssessmentReportsPage = () => {
         teacher_remarks: draft.teacher_remarks,
         principal_remarks: draft.principal_remarks,
         parent_acknowledgement: draft.parent_acknowledgement,
+        teacher_name: draft.teacher_name || user?.full_name || user?.name,
       });
       const updated = response.data?.data || draft;
       setSelected(updated);
@@ -173,50 +188,69 @@ const AssessmentReportsPage = () => {
   };
 
   const downloadPdf = async (report) => {
-    try {
-      const response = await apiClient.get(`/assessments/reports/${report.id}/pdf-official`, {
-        responseType: "blob",
-      });
-      const blobUrl = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `${report?.learner_details?.admission_number || report.id}-cbc-report.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(blobUrl);
-      toast.success("Official PDF downloaded");
-      return;
-    } catch (error) {
-      toast.error("Official PDF download failed. Queueing server generation.");
-    }
-    try {
-      await apiClient.post(`/assessments/reports/${report.id}/pdf-jobs`);
-      toast.success("Official PDF generation queued");
-      return;
-    } catch (error) {
-      toast.error("Official PDF queue failed. Creating a browser copy instead.");
-    }
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const learner = report?.learner_details || {};
     const school = report?.school_details || {};
+    doc.setFillColor(15, 118, 110);
+    doc.rect(0, 0, 297, 34, "F");
+    if (school.logo_url) {
+      try {
+        doc.addImage(await reportImageDataUrl(school.logo_url), 14, 5, 23, 23, undefined, "FAST");
+      } catch {
+        // Continue with the school name when an external host blocks logo access.
+      }
+    }
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
-    doc.text(school.name || "CBC Assessment Report", 14, 16);
+    doc.text(school.name || "Smart M Hub School", 43, 13);
     doc.setFontSize(11);
-    doc.text(`${report.exam_name || "-"} | ${report.term || "-"} | ${report.academic_year || "-"}`, 14, 25);
-    doc.text(`${learner.full_name || "-"} | ${learner.admission_number || "-"} | ${report.class_name || "-"}`, 14, 33);
-    let y = 46;
+    doc.text("OFFICIAL ASSESSMENT REPORT", 43, 22);
+    doc.setTextColor(17, 24, 39);
+    doc.setFontSize(10);
+    doc.text(`Date: ${new Date().toLocaleString()}`, 210, 41);
+    doc.text(`Exam: ${report.exam_name || "-"} (${report.exam_number || "-"})`, 14, 43);
+    doc.text(`Term: ${report.term || "-"}   Academic Year: ${report.academic_year || "-"}`, 14, 50);
+    doc.text(`Learner: ${learner.full_name || "-"}   Admission No: ${learner.admission_number || "-"}`, 14, 57);
+    doc.text(`Class: ${report.class_name || learner.class_name || "-"}   Stream: ${report.stream || learner.stream || "-"}`, 14, 64);
+    doc.text(`Teacher: ${report.teacher_name || user?.full_name || user?.name || "-"}`, 14, 71);
+    doc.setDrawColor(15, 118, 110);
+    doc.line(14, 76, 283, 76);
+    let y = 84;
+    doc.setFont(undefined, "bold");
+    doc.text("Learning Area", 16, y);
+    doc.text("Score", 102, y);
+    doc.text("Achievement Level", 130, y);
+    doc.text("Teacher Comment", 185, y);
+    doc.setFont(undefined, "normal");
+    y += 7;
     asArray(report.learning_areas).forEach((area, index) => {
-      if (y > 185) {
+      if (y > 180) {
         doc.addPage();
         y = 18;
       }
-      doc.text(`${index + 1}. ${area.name}: ${area.score ?? "-"} ${area.achievement_level || ""} ${area.teacher_remarks || ""}`, 14, y);
+      if (index % 2 === 0) {
+        doc.setFillColor(241, 245, 249);
+        doc.rect(14, y - 5, 269, 8, "F");
+      }
+      doc.text(`${index + 1}. ${area.name || area.learning_area || "-"}`, 16, y);
+      doc.text(String(area.score ?? "-"), 102, y);
+      doc.text(area.achievement_level || area.overall_grade || "-", 130, y);
+      doc.text(doc.splitTextToSize(area.teacher_remarks || "-", 92)[0], 185, y);
       y += 8;
     });
-    doc.text(`Teacher: ${report.teacher_remarks || "-"}`, 14, y + 8);
-    doc.text(`Principal: ${report.principal_remarks || "-"}`, 14, y + 16);
+    doc.setFont(undefined, "bold");
+    doc.text("Teacher's Comment:", 14, y + 5);
+    doc.setFont(undefined, "normal");
+    doc.text(doc.splitTextToSize(report.teacher_remarks || "-", 220), 52, y + 5);
+    doc.setFont(undefined, "bold");
+    doc.text("Principal's Comment:", 14, y + 18);
+    doc.setFont(undefined, "normal");
+    doc.text(doc.splitTextToSize(report.principal_remarks || "-", 215), 55, y + 18);
+    doc.text("Teacher Signature: ____________________", 14, y + 38);
+    doc.text("Principal Signature: ___________________", 108, y + 38);
+    doc.text("Official Stamp: _______________________", 205, y + 38);
     doc.save(`${learner.admission_number || "cbc-report"}.pdf`);
+    toast.success("Professional assessment PDF downloaded");
   };
 
   const summary = useMemo(() => {
@@ -319,6 +353,7 @@ const AssessmentReportsPage = () => {
                 <Info label="Class" value={draft.class_name} />
                 <Info label="Term" value={draft.term} />
                 <Info label="Status" value={draft.status} />
+                <Info label="Teacher" value={draft.teacher_name || user?.full_name || user?.name} />
               </div>
 
               <section className="space-y-3">

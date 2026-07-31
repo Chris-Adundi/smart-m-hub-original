@@ -191,12 +191,17 @@ const RegisterPage = () => {
                     <p className="mt-1 text-2xl font-bold text-white">
                       KES {Number(registrationSummary.installationFee || 5000).toLocaleString()}
                     </p>
+                    <p className="mt-2 text-sm text-slate-300">One-time charge during school registration.</p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-[#101827] p-4">
                     <p className="text-sm text-slate-400">Payment number</p>
                     <p className="mt-1 text-2xl font-bold text-white">+254702641920</p>
                   </div>
                 </div>
+
+                <p className="mt-4 text-sm text-slate-300">
+                  After registration, the school subscription is KES 2,000 per month, calculated from the registration date.
+                </p>
 
                 {paymentSubmitted ? (
                   <Alert className="mt-5 border-emerald-500/30 bg-emerald-500/10">

@@ -30,7 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
-import { Plus, Search } from "lucide-react";
+import { Edit, Plus, Search } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
 import { classLevelsForSchool } from "@/utils/schoolClasses";
 
@@ -103,6 +103,7 @@ const StudentsPage = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [editingStudent, setEditingStudent] = useState(null);
   const [formData, setFormData] = useState(initialForm);
   const [schoolProfile, setSchoolProfile] = useState(() => authService.getUser()?.school_branding || {});
 
@@ -170,9 +171,15 @@ const StudentsPage = () => {
           item === "Other" ? other_document : item
         ).filter(Boolean),
       };
-      await apiClient.post("/students", payload);
-      toast.success("Student admission submitted");
+      if (editingStudent) {
+        await apiClient.put(`/students/${editingStudent.id}`, payload);
+        toast.success("Student updated successfully");
+      } else {
+        await apiClient.post("/students", payload);
+        toast.success("Student admission submitted");
+      }
       setDialogOpen(false);
+      setEditingStudent(null);
       setFormData(initialForm);
       fetchStudents();
     } catch (error) {
@@ -196,6 +203,24 @@ const StudentsPage = () => {
     setProfileOpen(true);
   };
 
+  const openEdit = (student) => {
+    setEditingStudent(student);
+    setFormData({
+      ...initialForm,
+      ...student,
+      date_of_birth: student.date_of_birth ? String(student.date_of_birth).slice(0, 10) : "",
+      documents_attached: Array.isArray(student.documents_attached) ? student.documents_attached : [],
+      other_document: "",
+    });
+    setDialogOpen(true);
+  };
+
+  const openAdmission = () => {
+    setEditingStudent(null);
+    setFormData(initialForm);
+    setDialogOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -206,14 +231,14 @@ const StudentsPage = () => {
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button onClick={openAdmission}>
               <Plus className="w-4 h-4 mr-2" />
               New Admission
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>SMART M HUB - Student Admission Form</DialogTitle>
+              <DialogTitle>{editingStudent ? "Edit Student" : "SMART M HUB - Student Admission Form"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-6">
               <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -319,7 +344,7 @@ const StudentsPage = () => {
                 )}
               </section>
 
-              <Button type="submit" className="w-full">Submit Admission</Button>
+              <Button type="submit" className="w-full">{editingStudent ? "Save Student Changes" : "Submit Admission"}</Button>
             </form>
           </DialogContent>
         </Dialog>
@@ -354,13 +379,14 @@ const StudentsPage = () => {
                 <TableHead>Parent/Guardian</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Approval</TableHead>
+                <TableHead>Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-6">Loading...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center py-6">Loading...</TableCell></TableRow>
               ) : filteredStudents.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-6">No students found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center py-6">No students found</TableCell></TableRow>
               ) : (
                 filteredStudents.map((student) => (
                   <TableRow key={student.id} className="cursor-pointer" onClick={() => openProfile(student)}>
@@ -376,6 +402,11 @@ const StudentsPage = () => {
                     <TableCell>{student.guardian_name}</TableCell>
                     <TableCell><Badge>{student.status}</Badge></TableCell>
                     <TableCell><Badge>{student.approval_status}</Badge></TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); openEdit(student); }}>
+                        <Edit className="w-3 h-3 mr-1" /> Edit
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               )}

@@ -5215,6 +5215,48 @@ async def create_student(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@api_router.put("/students/{student_id}")
+async def update_student(
+    student_id: str,
+    request: CreateStudentRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    school_id = str(current_user.get("school_id") or "").strip()
+    role = normalize_role(current_user.get("role"))
+    if role not in {"school_admin", "secretary"}:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    student = await db.students.find_one({**resource_lookup(student_id), "school_id": school_id})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    admission_number = str(request.admission_number or student.get("admission_number") or "").strip()
+    if admission_number and not is_not_applicable_identifier(admission_number):
+        duplicate = await db.students.find_one({
+            "school_id": school_id,
+            "admission_number": admission_number,
+            "id": {"$ne": student.get("id")},
+        })
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Admission number already exists")
+
+    # Preserve fields not present in the active edit form instead of clearing legacy data.
+    update = request.model_dump(exclude_unset=True)
+    update["admission_number"] = admission_number
+    if "class_name" in update:
+        update["education_level"] = classify_school_level(request.class_name)
+    if "date_of_birth" in update:
+        update["date_of_birth"] = datetime.fromisoformat(request.date_of_birth) if request.date_of_birth else None
+    update["updated_at"] = now_utc()
+    update["updated_by"] = current_user.get("user_id") or current_user.get("id")
+    await db.students.update_one(
+        {"id": student.get("id"), "school_id": school_id},
+        {"$set": update},
+    )
+    await log_security_event("student_updated", current_user, {"student_id": student.get("id")})
+    updated = await db.students.find_one({"id": student.get("id"), "school_id": school_id}, {"_id": 0})
+    return api_success(serialize_doc(updated), message="Student updated successfully")
+
+
 # =========================
 # STUDENTS LIST (CLEAN + SAFE)
 # =========================
@@ -7024,6 +7066,12 @@ async def generate_official_report_pdf(
     current_user: dict = Depends(get_current_user)
 ):
     report = await get_assessment_report_for_user(report_id, current_user)
+    if not report.get("teacher_name") and report.get("created_by"):
+        creator = await db.users.find_one(
+            {"id": report.get("created_by"), "school_id": report.get("school_id")},
+            {"_id": 0, "full_name": 1},
+        )
+        report["teacher_name"] = (creator or {}).get("full_name")
     filename = f"{report.get('learner_details', {}).get('admission_number') or report_id}-cbc-report.pdf"
     return Response(
         content=render_simple_report_pdf(public_report_payload(report)),
@@ -9252,6 +9300,7 @@ async def build_report_from_template(
             "address": school.get("address") if school else None,
             "principal_name": school.get("principal_name") if school else None,
         },
+        "teacher_name": (current_user or {}).get("full_name") or (current_user or {}).get("name"),
         "learning_areas": template.get("learning_areas") or [],
         "competencies": template.get("competencies") or build_named_assessments(DEFAULT_COMPETENCIES),
         "values": template.get("values") or build_named_assessments(DEFAULT_VALUES),

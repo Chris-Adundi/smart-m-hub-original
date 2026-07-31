@@ -43,11 +43,19 @@ def test_simple_report_renderer_returns_pdf_bytes():
     pdf = render_simple_report_pdf({
         "school_details": {"name": "School"},
         "learner_details": {"full_name": "Learner"},
+        "exam_name": "End Term Examination",
+        "term": "Term 2",
+        "academic_year": "2026",
+        "teacher_name": "Teacher One",
+        "teacher_remarks": "A strong and consistent performance.",
         "learning_areas": [{"name": "English", "overall_grade": "AE"}],
     })
 
     assert pdf.startswith(b"%PDF-1.4")
     assert b"%%EOF" in pdf
+    assert b"End Term Examination" in pdf
+    assert b"Teacher One" in pdf
+    assert b"Teacher's Comment" in pdf
 
 
 def test_webhook_signature_is_stable_for_canonical_payload():
@@ -70,6 +78,7 @@ def test_build_report_stores_template_snapshot_and_version():
     assert report["template_version"] == 3
     assert report["template_snapshot"]["id"] == "tpl1"
     assert report["learning_areas"] == [{"name": "English"}]
+    assert report["teacher_name"] is None
 
 
 def test_future_foundation_routes_are_registered():
