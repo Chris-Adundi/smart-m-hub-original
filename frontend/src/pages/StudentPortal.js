@@ -25,6 +25,7 @@ import {
 import { API, apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+import { downloadAssessmentReportPdf, downloadPaymentReceiptPdf } from "@/utils/pdfDocuments";
 
 import {
   User,
@@ -236,6 +237,17 @@ const StudentPortal = () => {
   };
 
   const downloadReceipt = async (payment) => {
+    try {
+      await downloadPaymentReceiptPdf(payment, { student });
+      toast.success("Official payment receipt downloaded");
+    } catch (error) {
+      toast.error(error?.message || "Professional receipt failed; creating a basic PDF copy.");
+      await legacyDownloadReceipt(payment);
+    }
+    return;
+  };
+
+  const legacyDownloadReceipt = async (payment) => {
     const doc = new jsPDF();
     doc.setFillColor(15, 118, 110);
     doc.rect(0, 0, 210, 34, "F");
@@ -343,6 +355,17 @@ const StudentPortal = () => {
   };
 
   const generateCBCReport = async (report) => {
+    try {
+      await downloadAssessmentReportPdf(report, authService.getUser() || {});
+      toast.success("Assessment report downloaded");
+    } catch (error) {
+      toast.error(error?.message || "Professional report failed; creating a basic PDF copy.");
+      await legacyGenerateCBCReport(report);
+    }
+    return;
+  };
+
+  const legacyGenerateCBCReport = async (report) => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const learner = report?.learner_details || {};
     const school = report?.school_details || {};

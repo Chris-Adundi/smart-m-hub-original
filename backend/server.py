@@ -5989,15 +5989,22 @@ async def get_student_fee_profile(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    payments = await db.payments.find(
-        {"student_id": student_id, "school_id": school_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(500)
+    payments, fee_structures, school = await asyncio.gather(
+        db.payments.find(
+            {"student_id": student_id, "school_id": school_id}, {"_id": 0}
+        ).sort("created_at", -1).to_list(500),
+        db.fee_structures.find(
+            {"school_id": school_id, "class_name": student.get("class_name")}, {"_id": 0}
+        ).sort("created_at", -1).to_list(100),
+        db.schools.find_one({"id": school_id}, {"_id": 0}),
+    )
 
-    fee_structures = await db.fee_structures.find(
-        {"school_id": school_id, "class_name": student.get("class_name")},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
+    recorder_ids = list({str(payment.get("submitted_by")) for payment in payments if payment.get("submitted_by")})
+    recorders = await db.users.find(
+        {"school_id": school_id, "id": {"$in": recorder_ids}},
+        {"_id": 0, "id": 1, "full_name": 1},
+    ).to_list(length=len(recorder_ids)) if recorder_ids else []
+    recorder_names = {str(item.get("id")): item.get("full_name") for item in recorders}
 
     total_due = sum(float(item.get("amount") or 0) for item in fee_structures)
     approved_paid = sum(
@@ -6011,6 +6018,17 @@ async def get_student_fee_profile(
         payment["year"] = payment.get("academic_year") or str(payment.get("created_at") or "")[:4]
         payment["payment_breakdown"] = receipt_breakdown(payment)
         payment["balance_after_payment"] = payment.get("outstanding_balance")
+        payment["previous_balance"] = payment.get("total_amount_due")
+        payment["recorded_by_name"] = recorder_names.get(str(payment.get("submitted_by")))
+        payment["class_name"] = student.get("class_name")
+        payment["stream"] = student.get("stream")
+        payment["school_details"] = {
+            "name": (school or {}).get("name"),
+            "logo_url": (school or {}).get("logo_url") or (school or {}).get("logo"),
+            "address": (school or {}).get("address"),
+            "phone": (school or {}).get("phone"),
+            "email": (school or {}).get("email"),
+        }
 
     return {
         "success": True,
@@ -8295,6 +8313,13 @@ async def get_my_portal_data(
                 r["term"] = exam.get("term")
                 r["academic_year"] = exam.get("academic_year")
 
+        payment_recorder_ids = list({str(payment.get("submitted_by")) for payment in payments if payment.get("submitted_by")})
+        payment_recorders = await db.users.find(
+            {"school_id": school_id, "id": {"$in": payment_recorder_ids}},
+            {"_id": 0, "id": 1, "full_name": 1},
+        ).to_list(length=len(payment_recorder_ids)) if payment_recorder_ids else []
+        payment_recorder_names = {str(item.get("id")): item.get("full_name") for item in payment_recorders}
+
         for payment in payments:
             payment["school_name"] = school.get("name") if school else None
             payment["school_code"] = school.get("school_code") if school else None
@@ -8303,7 +8328,18 @@ async def get_my_portal_data(
             payment["student_name"] = student.get("full_name")
             payment["admission_number"] = student.get("admission_number")
             payment["received_from"] = payment.get("received_from") or student.get("guardian_name") or student.get("secondary_guardian_name")
+            payment["class_name"] = student.get("class_name")
+            payment["stream"] = student.get("stream")
+            payment["previous_balance"] = payment.get("total_amount_due")
             payment["payment_breakdown"] = receipt_breakdown(payment)
+            payment["recorded_by_name"] = payment_recorder_names.get(str(payment.get("submitted_by")))
+            payment["school_details"] = {
+                "name": (school or {}).get("name"),
+                "logo_url": (school or {}).get("logo_url") or (school or {}).get("logo"),
+                "address": (school or {}).get("address"),
+                "phone": (school or {}).get("phone"),
+                "email": (school or {}).get("email"),
+            }
             payment["receipt_layout"] = {
                 "title": "SMART M HUB - SCHOOL PAYMENT RECEIPT",
                 "school_logo": payment["school_logo"],
@@ -9331,8 +9367,11 @@ async def build_report_from_template(
             "email": school.get("email") if school else None,
             "address": school.get("address") if school else None,
             "principal_name": school.get("principal_name") if school else None,
+            "closing_date": school.get("closing_date") if school else None,
+            "opening_date": school.get("opening_date") if school else None,
         },
         "teacher_name": (current_user or {}).get("full_name") or (current_user or {}).get("name"),
+        "class_teacher_name": (current_user or {}).get("full_name") if normalize_role((current_user or {}).get("role")) == "teacher" else None,
         "learning_areas": template.get("learning_areas") or [],
         "competencies": template.get("competencies") or build_named_assessments(DEFAULT_COMPETENCIES),
         "values": template.get("values") or build_named_assessments(DEFAULT_VALUES),

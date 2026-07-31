@@ -22,6 +22,7 @@ import { API, apiClient, authService } from "@/App";
 import CbcReportSummaryCards from "@/features/cbc/CbcReportSummaryCards";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+import { downloadAssessmentReportPdf } from "@/utils/pdfDocuments";
 import { CheckCircle2, Download, Eye, FileText, Send, Upload } from "lucide-react";
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -188,6 +189,19 @@ const AssessmentReportsPage = () => {
   };
 
   const downloadPdf = async (report) => {
+    try {
+      await downloadAssessmentReportPdf(report, user || {});
+      toast.success("Professional assessment PDF downloaded");
+    } catch (error) {
+      toast.error(error?.message || "Professional layout failed; creating a basic PDF copy.");
+      await legacyDownloadPdf(report);
+    }
+    return;
+  };
+
+  // Retained as an offline-compatible fallback layout while existing callers
+  // transition to the shared official document renderer.
+  const legacyDownloadPdf = async (report) => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const learner = report?.learner_details || {};
     const school = report?.school_details || {};

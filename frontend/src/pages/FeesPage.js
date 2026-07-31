@@ -28,7 +28,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { apiClient, authService, formatApiError } from "@/App";
 import { toast } from "sonner";
-import { Plus, Search } from "lucide-react";
+import { Download, Plus, Search } from "lucide-react";
+import { downloadPaymentReceiptPdf } from "@/utils/pdfDocuments";
 
 const money = (value) => Number(value || 0).toLocaleString();
 const thisYear = new Date().getFullYear().toString();
@@ -176,6 +177,15 @@ const FeesPage = () => {
       if (selectedStudent) await openStudent(selectedStudent);
     } catch (error) {
       toast.error(formatApiError(error, "Failed to reject receipt"));
+    }
+  };
+
+  const downloadReceipt = async (payment) => {
+    try {
+      await downloadPaymentReceiptPdf(payment, { student: selectedStudent });
+      toast.success("Official payment receipt downloaded");
+    } catch (error) {
+      toast.error(formatApiError(error, "Receipt download failed"));
     }
   };
 
@@ -371,12 +381,13 @@ const FeesPage = () => {
                     <TableHead>Balance</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Student Portal</TableHead>
+                    <TableHead>PDF</TableHead>
                     {isAdmin && <TableHead>Review</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {profilePayments.length === 0 ? (
-                    <TableRow><TableCell colSpan={isAdmin ? 8 : 7} className="text-center py-8">No payments found</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={isAdmin ? 9 : 8} className="text-center py-8">No payments found</TableCell></TableRow>
                   ) : (
                     profilePayments.map((payment) => (
                       <TableRow key={payment.id}>
@@ -387,6 +398,11 @@ const FeesPage = () => {
                         <TableCell>KES {money(payment.outstanding_balance)}</TableCell>
                         <TableCell><Badge>{payment.approval_status || payment.status}</Badge></TableCell>
                         <TableCell>{payment.visible_to_student ? "Available" : "Waiting approval"}</TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" onClick={() => downloadReceipt(payment)}>
+                            <Download className="w-3 h-3 mr-1" /> PDF
+                          </Button>
+                        </TableCell>
                         {isAdmin && (
                           <TableCell>
                             {payment.approval_status === "pending" ? (
