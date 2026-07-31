@@ -1555,6 +1555,19 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
     }
 
 
+@api_router.get("/media/{file_asset_id}")
+async def serve_managed_media(file_asset_id: str):
+    """Serve immutable uploaded media persisted in Mongo when object storage is unavailable."""
+    blob = await db.file_blobs.find_one({"id": file_asset_id}, {"_id": 0})
+    if not blob or not blob.get("payload"):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    return Response(
+        content=bytes(blob["payload"]),
+        media_type=blob.get("content_type") or "application/octet-stream",
+        headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @api_router.post("/uploads")
 async def upload_file(
     request: Request,
@@ -1592,9 +1605,28 @@ async def upload_file(
         logger.error("Upload storage error: %s", exc)
         raise HTTPException(status_code=500, detail="File storage is not available")
 
+    file_asset_id = str(uuid.uuid4())
     url = stored["url"]
+    if stored["storage_backend"] == "local":
+        # Render's local filesystem is ephemeral. Retain a durable copy in Mongo
+        # and serve it through the API unless S3/object storage is configured.
+        await db.file_blobs.insert_one({
+            "id": file_asset_id,
+            "school_id": str(school_id),
+            "content_type": file.content_type,
+            "payload": payload,
+            "size": len(payload),
+            "sha256": sha256_hex(payload),
+            "created_at": now_utc(),
+        })
+        url = f"/api/media/{file_asset_id}"
+    # Frontends run on different Render origins. Persist a browser-resolvable
+    # absolute URL so uploaded media never points at the frontend's /uploads path.
+    if str(url).startswith("/"):
+        backend_origin = str(os.getenv("PUBLIC_BACKEND_URL") or request.base_url).rstrip("/")
+        url = f"{backend_origin}{url}"
     file_asset = {
-        "id": str(uuid.uuid4()),
+        "id": file_asset_id,
         "school_id": str(school_id),
         "uploaded_by": current_user.get("user_id") or current_user.get("id"),
         "category": upload_category,
@@ -9704,6 +9736,7 @@ async def ensure_database_indexes():
         (db.users, [("school_id", 1), ("approval_status", 1), ("role", 1)], {"name": "users_school_approval_role_idx"}),
         (db.users, [("school_id", 1), ("approval_status", 1), ("created_at", -1)], {"name": "users_school_approval_created_idx"}),
         (db.students, [("school_id", 1), ("admission_number", 1)], {"name": "students_school_admission_idx"}),
+        (db.file_blobs, [("id", 1)], {"name": "file_blobs_id_unique_idx", "unique": True}),
         (db.students, [("school_id", 1), ("student_access_code", 1)], {"name": "students_school_access_code_idx", "sparse": True}),
         (db.students, [("school_id", 1), ("id", 1)], {"name": "students_school_id_idx"}),
         (db.students, [("school_id", 1), ("class_name", 1), ("status", 1), ("approval_status", 1)], {"name": "students_school_class_status_approval_idx"}),

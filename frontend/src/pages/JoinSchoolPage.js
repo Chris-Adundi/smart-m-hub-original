@@ -23,6 +23,7 @@ import {
 
 import { toast } from "sonner";
 import { Building2, GraduationCap } from "lucide-react";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 const SCHOOL_CODE_PATTERN = /^(SMH-KE-\d{6}|SMH-[A-Z0-9]{8,12})$/;
 
@@ -150,7 +151,7 @@ const JoinSchoolPage = () => {
         <CardHeader className="text-center space-y-4">
           <div className="mx-auto w-16 h-16 bg-emerald-600 rounded-xl flex items-center justify-center overflow-hidden">
             {school?.logo_url ? (
-              <img src={school.logo_url} alt={`${school.name} logo`} className="w-full h-full object-contain" />
+              <img src={resolveMediaUrl(school.logo_url)} alt={`${school.name} logo`} className="w-full h-full object-contain" />
             ) : (
               <GraduationCap className="w-10 h-10 text-white" />
             )}

@@ -12,6 +12,11 @@ const resolveApiBaseUrl = () => {
 
 const API_BASE_URL = resolveApiBaseUrl();
 const API_ROOT = API_BASE_URL.replace(/\/platform\/?$/, "");
+export const resolveMediaUrl = (value) => {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  return url.startsWith("/") ? `${API_ROOT.replace(/\/api\/?$/, "")}${url}` : url;
+};
 let refreshRequest = null;
 
 const getAuthToken = () =>

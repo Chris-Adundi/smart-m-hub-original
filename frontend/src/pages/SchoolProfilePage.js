@@ -8,6 +8,7 @@ import { apiClient, authService } from "@/App";
 import { toast } from "sonner";
 import { Building2, Copy } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 const SchoolProfilePage = () => {
   const [loading, setLoading] = useState(true);
@@ -132,12 +133,13 @@ const SchoolProfilePage = () => {
 
     try {
       const url = await uploadManagedFile(file, "school_logo");
-      setLogoPreview(url);
+      await apiClient.patch("/school/profile", { logo_url: url });
+      setLogoPreview(resolveMediaUrl(url));
       setFormData((prev) => ({
         ...prev,
         logo_url: url
       }));
-      toast.success("Logo uploaded");
+      toast.success("Logo uploaded and saved to the school profile");
     } catch (error) {
       toast.error(error?.response?.data?.detail || error?.message || "Logo upload failed");
     }
@@ -235,7 +237,7 @@ const SchoolProfilePage = () => {
           <Card className="border-2 border-primary/20">
             {formData.banner_url && (
               <img
-                src={formData.banner_url}
+                src={resolveMediaUrl(formData.banner_url)}
                 alt={`${formData.name} banner`}
                 className="w-full h-48 object-cover rounded-t-xl"
               />
@@ -243,7 +245,7 @@ const SchoolProfilePage = () => {
             <CardContent className="p-10 text-center space-y-6">
 
               {logoPreview ? (
-                <img src={logoPreview} className="w-32 h-32 mx-auto rounded-xl object-contain" />
+                <img src={resolveMediaUrl(logoPreview)} alt={`${formData.name || "School"} logo`} className="w-32 h-32 mx-auto rounded-xl object-contain" />
               ) : (
                 <Building2 className="w-20 h-20 mx-auto text-primary" />
               )}

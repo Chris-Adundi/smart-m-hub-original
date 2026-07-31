@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { activateSchool, approveSchool, getSchoolDetail, resetSchoolPassword, suspendSchool } from "../api/platformApi";
+import { activateSchool, approveSchool, getSchoolDetail, resetSchoolPassword, resolveMediaUrl, suspendSchool } from "../api/platformApi";
 
 export default function SchoolDetails() {
   const [data, setData] = useState(null);
@@ -51,7 +51,7 @@ export default function SchoolDetails() {
   return (
     <div>
       <div style={heroStyle}>
-        {data.logo_url && <img src={data.logo_url} alt="" style={logoStyle} />}
+        {data.logo_url && <img src={resolveMediaUrl(data.logo_url)} alt="" style={logoStyle} />}
         <div>
           <h1 style={titleStyle}>{data.name}</h1>
           <p style={mutedStyle}>{data.school_code} | {data.approval_status} | {data.subscription_status}</p>

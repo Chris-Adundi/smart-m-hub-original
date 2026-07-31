@@ -14,6 +14,7 @@ export default function PwaInstallPrompt() {
   const [installAvailable, setInstallAvailable] = useState(hasPwaInstallPrompt);
   const [open, setOpen] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
+  const directInstallLink = new URLSearchParams(window.location.search).get("install") === "1";
 
   const presentInstall = useCallback(() => {
     if (isPwaStandalone()) return;
@@ -29,7 +30,7 @@ export default function PwaInstallPrompt() {
   useEffect(() => {
     const unsubscribe = subscribeToPwaInstall((available) => {
       setInstallAvailable(available);
-      if (available && !localStorage.getItem(DISMISSED_KEY) && !isPwaStandalone()) {
+      if (available && (directInstallLink || !localStorage.getItem(DISMISSED_KEY)) && !isPwaStandalone()) {
         window.setTimeout(() => setOpen(true), 1800);
       }
     });
@@ -52,7 +53,11 @@ export default function PwaInstallPrompt() {
     window.addEventListener("smart-m-hub:install", manualInstall);
     window.addEventListener("appinstalled", installed);
 
-    if (isIosSafari() && !localStorage.getItem(DISMISSED_KEY) && !isPwaStandalone()) {
+    if (directInstallLink && !isPwaStandalone()) {
+      presentInstall();
+    }
+
+    if (isIosSafari() && (directInstallLink || !localStorage.getItem(DISMISSED_KEY)) && !isPwaStandalone()) {
       const timer = window.setTimeout(() => {
         setShowIosHelp(true);
         setOpen(true);
@@ -70,7 +75,7 @@ export default function PwaInstallPrompt() {
       window.removeEventListener("smart-m-hub:install", manualInstall);
       window.removeEventListener("appinstalled", installed);
     };
-  }, [presentInstall]);
+  }, [directInstallLink, presentInstall]);
 
   const dismiss = () => {
     localStorage.setItem(DISMISSED_KEY, "true");

@@ -8,6 +8,8 @@ import { authService } from "@/services/authService";
 import { API } from "@/App";
 import { Button } from "@/components/ui/button";
 import { usePwaInstallAvailability } from "@/components/InstallSmartMHub";
+import { promptPwaInstall } from "@/pwaInstall";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 import {
   LayoutDashboard,
@@ -285,7 +287,7 @@ const DashboardLayout = () => {
           <div className="flex items-center gap-3 min-w-0">
             {branding?.logo_url && (
               <img
-                src={branding.logo_url}
+                src={resolveMediaUrl(branding.logo_url)}
                 alt={`${branding.name || "School"} logo`}
                 className="w-9 h-9 rounded-lg object-contain bg-white/10"
               />
@@ -340,12 +342,15 @@ const DashboardLayout = () => {
 
           <Button
             variant="ghost"
-            onClick={() => window.dispatchEvent(new Event("smart-m-hub:install"))}
+            onClick={async () => {
+              const result = await promptPwaInstall();
+              if (result.outcome === "unavailable") window.dispatchEvent(new Event("smart-m-hub:install"));
+            }}
             className="w-full justify-start"
             title={installAvailable ? "Install Smart M Hub" : "Open installation instructions"}
           >
             <Download className="w-4 h-4 mr-2" />
-            Install Smart M Hub
+            Install Smart M Hub Now
           </Button>
 
           <Button
@@ -367,7 +372,7 @@ const DashboardLayout = () => {
           style={
             branding?.banner_url
               ? {
-                  backgroundImage: `linear-gradient(rgba(15,23,42,.86), rgba(15,23,42,.86)), url("${branding.banner_url}")`,
+                  backgroundImage: `linear-gradient(rgba(15,23,42,.86), rgba(15,23,42,.86)), url("${resolveMediaUrl(branding.banner_url)}")`,
                 }
               : undefined
           }

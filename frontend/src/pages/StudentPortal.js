@@ -50,6 +50,10 @@ const safeDate = (d) => {
   }
 };
 
+const resolvePortalMediaUrl = (url) => String(url || "").startsWith("/")
+  ? `${API.replace(/\/api$/, "")}${url}`
+  : url;
+
 const imageDataUrl = (url) => new Promise((resolve, reject) => {
   const image = new Image();
   image.crossOrigin = "anonymous";
@@ -61,7 +65,7 @@ const imageDataUrl = (url) => new Promise((resolve, reject) => {
     resolve(canvas.toDataURL("image/png"));
   };
   image.onerror = reject;
-  image.src = String(url || "").startsWith("/") ? `${API.replace(/\/api$/, "")}${url}` : url;
+  image.src = resolvePortalMediaUrl(url);
 });
 
 /* ---------------- GRADING ---------------- */
@@ -177,7 +181,7 @@ const StudentPortal = () => {
       </head>
       <body>
         <div class="header">
-          ${payment?.school_logo ? `<img src="${payment.school_logo}" />` : ""}
+          ${payment?.school_logo ? `<img src="${resolvePortalMediaUrl(payment.school_logo)}" />` : ""}
           <div>
             <h1>SMART M HUB - SCHOOL PAYMENT RECEIPT</h1>
             <p>${payment?.school_name || ""} | ${payment?.school_code || ""}</p>
@@ -217,7 +221,7 @@ const StudentPortal = () => {
         <div class="footer">
           <div><p>Received By</p><div class="line"></div></div>
           <div><p>Approved By</p><div class="line"></div></div>
-          <div class="stamp"><p>Official School Stamp</p>${payment?.school_stamp ? `<img src="${payment.school_stamp}" />` : `<div class="line"></div>`}</div>
+          <div class="stamp"><p>Official School Stamp</p>${payment?.school_stamp ? `<img src="${resolvePortalMediaUrl(payment.school_stamp)}" />` : `<div class="line"></div>`}</div>
         </div>
       </body>
     </html>`;

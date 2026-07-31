@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 
 import { apiClient } from "@/App";
 import { uploadManagedFile } from "@/utils/uploads";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 import { toast } from "sonner";
 import { Edit, GraduationCap, LockKeyhole, Plus, Search, Trash2, UserCheck, UserX } from "lucide-react";
 
@@ -230,7 +231,7 @@ const StaffPage = () => {
     try {
       const url = await uploadManagedFile(file, "document");
       updateField("passport_photo_url", url);
-      toast.success("Profile photo uploaded");
+      toast.success("Profile photo uploaded. Save the staff form to apply it.");
     } catch (error) {
       toast.error(error?.message || "Photo upload failed");
     }
@@ -367,7 +368,9 @@ const StaffPage = () => {
                 <div className="space-y-2 md:col-span-2">
                   <Label>Passport Photo</Label>
                   <Input type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files?.[0])} />
-                  {formData.passport_photo_url && <p className="text-xs text-emerald-600">Photo uploaded</p>}
+                  {formData.passport_photo_url && (
+                    <img src={resolveMediaUrl(formData.passport_photo_url)} alt="Staff preview" className="h-20 w-20 rounded-lg object-cover border" />
+                  )}
                 </div>
               </FormSection>
 
@@ -625,6 +628,11 @@ function ProfileGrid({ member }) {
   ];
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {member.passport_photo_url && (
+        <div className="md:col-span-2 flex justify-center">
+          <img src={resolveMediaUrl(member.passport_photo_url)} alt={`${member.full_name || "Staff"} profile`} className="h-28 w-28 rounded-xl object-cover border border-slate-200" />
+        </div>
+      )}
       {rows.map(([label, value]) => (
         <div key={label} className="rounded-lg border border-slate-200 p-3">
           <p className="text-xs text-slate-500">{label}</p>

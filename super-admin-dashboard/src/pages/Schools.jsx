@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { activateSchool, approveSchool, deleteSchool, getSchools, resetSchoolPassword, suspendSchool } from "../api/platformApi";
+import { activateSchool, approveSchool, deleteSchool, getSchools, resetSchoolPassword, resolveMediaUrl, suspendSchool } from "../api/platformApi";
 
 export default function Schools() {
   const [schools, setSchools] = useState([]);
@@ -68,7 +68,7 @@ export default function Schools() {
           <tbody>
             {schools.map((s) => (
               <tr key={s.id}>
-                <td style={tdStyle}>{s.logo_url ? <img src={s.logo_url} alt="" style={logoStyle} /> : <span style={avatarStyle}>{(s.name || "S").slice(0, 1)}</span>}</td>
+                <td style={tdStyle}>{s.logo_url ? <img src={resolveMediaUrl(s.logo_url)} alt="" style={logoStyle} /> : <span style={avatarStyle}>{(s.name || "S").slice(0, 1)}</span>}</td>
                 <td style={tdStyle}>{s.name}</td>
                 <td style={tdStyle}>{s.school_code || "Pending"}</td>
                 <td style={tdStyle}>{s.school_type || "N/A"}</td>

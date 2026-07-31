@@ -86,6 +86,7 @@ def test_future_foundation_routes_are_registered():
 
     assert "/api/mobile/sync-manifest" in paths
     assert "/api/webhooks/endpoints" in paths
+    assert "/api/media/{file_asset_id}" in paths
 
 
 def test_worker_accepts_webhook_delivery_job():

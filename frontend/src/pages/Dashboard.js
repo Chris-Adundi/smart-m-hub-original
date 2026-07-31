@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/tabs";
 
 import { apiClient, authService, formatApiError } from "@/App";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 import { toast } from "sonner";
 
@@ -658,7 +659,7 @@ const isStudent =
             <div className="flex items-center gap-3">
               {schoolIdentity.logo_url || schoolIdentity.logo ? (
                 <img
-                  src={schoolIdentity.logo_url || schoolIdentity.logo}
+                  src={resolveMediaUrl(schoolIdentity.logo_url || schoolIdentity.logo)}
                   alt={`${schoolIdentity.name} logo`}
                   className="w-14 h-14 object-contain rounded-xl bg-white/10"
                 />

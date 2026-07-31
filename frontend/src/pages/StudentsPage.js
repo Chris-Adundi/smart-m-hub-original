@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { Edit, Plus, Search } from "lucide-react";
 import { uploadManagedFile } from "@/utils/uploads";
 import { classLevelsForSchool } from "@/utils/schoolClasses";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 const initialForm = {
   admission_number: "",
@@ -145,7 +146,7 @@ const StudentsPage = () => {
     try {
       const url = await uploadManagedFile(file, category);
       updateField(field, url);
-      toast.success("File uploaded");
+      toast.success(editingStudent ? "Photo uploaded. Save student changes to apply it." : "File uploaded. Submit the admission form to apply it.");
     } catch (error) {
       toast.error(error?.response?.data?.detail || error?.message || "File upload failed");
     }
@@ -253,7 +254,7 @@ const StudentsPage = () => {
                   <Label>Passport Photo</Label>
                   <Input type="file" accept="image/*" onChange={(e) => updateFileField("passport_photo_url", e.target.files?.[0], "student_photo")} />
                   {formData.passport_photo_url && (
-                    <img src={formData.passport_photo_url} alt="Passport preview" className="mt-2 h-20 w-20 rounded-lg object-cover border border-[#1E293B]" />
+                    <img src={resolveMediaUrl(formData.passport_photo_url)} alt="Passport preview" className="mt-2 h-20 w-20 rounded-lg object-cover border border-[#1E293B]" />
                   )}
                 </div>
                 <div>
@@ -425,7 +426,7 @@ const StudentsPage = () => {
               <div className="flex items-center gap-4 mb-4">
                 {selectedStudent.passport_photo_url ? (
                   <img
-                    src={selectedStudent.passport_photo_url}
+                    src={resolveMediaUrl(selectedStudent.passport_photo_url)}
                     alt={`${selectedStudent.full_name} passport`}
                     className="h-20 w-20 rounded-xl object-cover border border-[#1E293B]"
                   />

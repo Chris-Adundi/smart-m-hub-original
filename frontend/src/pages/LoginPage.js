@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import InstallSmartMHub from "@/components/InstallSmartMHub";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 import { toast } from "sonner";
 
@@ -610,7 +611,7 @@ const selectedRoleData = roles.find(
           >
             {resolvedSchool?.logo_url ? (
               <img
-                src={resolvedSchool.logo_url}
+                src={resolveMediaUrl(resolvedSchool.logo_url)}
                 alt={`${resolvedSchool.name} logo`}
                 className="w-full h-full object-contain"
               />
