@@ -338,26 +338,53 @@ const StudentPortal = () => {
     toast.success("Downloaded report card");
   };
 
-  const generateCBCReport = (report) => {
+  const generateCBCReport = async (report) => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     const learner = report?.learner_details || {};
     const school = report?.school_details || {};
+    doc.setFillColor(15, 118, 110);
+    doc.rect(0, 0, 297, 34, "F");
+    if (school.logo_url) {
+      try {
+        doc.addImage(await imageDataUrl(school.logo_url), 14, 5, 23, 23, undefined, "FAST");
+      } catch {
+        // Continue with school name if the logo cannot be read by this browser.
+      }
+    }
+    doc.setTextColor(255, 255, 255);
     doc.setFontSize(18);
-    doc.text(school.name || "CBC Assessment Report", 14, 16);
+    doc.text(school.name || "Smart M Hub School", 43, 13);
     doc.setFontSize(11);
-    doc.text(`${report?.exam_name || "-"} | ${report?.term || "-"} | ${report?.academic_year || "-"}`, 14, 25);
-    doc.text(`${learner.full_name || student?.full_name || "-"} | ${learner.admission_number || student?.admission_number || "-"} | ${report?.class_name || "-"}`, 14, 33);
-    let y = 46;
+    doc.text("OFFICIAL ASSESSMENT REPORT", 43, 22);
+    doc.setTextColor(17, 24, 39);
+    doc.setFontSize(10);
+    doc.text(`Complete Date: ${new Date().toLocaleString()}`, 202, 42);
+    doc.text(`Exam: ${report?.exam_name || "-"} (${report?.exam_number || "-"})`, 14, 43);
+    doc.text(`Term: ${report?.term || "-"}   Academic Year: ${report?.academic_year || "-"}`, 14, 50);
+    doc.text(`Learner: ${learner.full_name || student?.full_name || "-"}   Admission No: ${learner.admission_number || student?.admission_number || "-"}`, 14, 57);
+    doc.text(`Class: ${report?.class_name || "-"}   Teacher: ${report?.teacher_name || "-"}`, 14, 64);
+    doc.setDrawColor(15, 118, 110);
+    doc.line(14, 70, 283, 70);
+    let y = 80;
     (report?.learning_areas || []).forEach((area, index) => {
       if (y > 185) {
         doc.addPage();
         y = 18;
       }
-      doc.text(`${index + 1}. ${area.name}: ${area.score ?? "-"} ${area.achievement_level || ""} ${area.teacher_remarks || ""}`, 14, y);
+      if (index % 2 === 0) {
+        doc.setFillColor(241, 245, 249);
+        doc.rect(14, y - 5, 269, 8, "F");
+      }
+      doc.text(`${index + 1}. ${area.name || "-"}`, 16, y);
+      doc.text(`Score: ${area.score ?? "-"}`, 105, y);
+      doc.text(`Level: ${area.achievement_level || area.overall_grade || "-"}`, 140, y);
+      doc.text(doc.splitTextToSize(`Comment: ${area.teacher_remarks || "-"}`, 90)[0], 190, y);
       y += 8;
     });
     doc.text(`Teacher Remarks: ${report?.teacher_remarks || "-"}`, 14, y + 8);
     doc.text(`Principal Remarks: ${report?.principal_remarks || "-"}`, 14, y + 16);
+    doc.text("Teacher Signature: ____________________", 14, y + 34);
+    doc.text("Principal Signature / School Stamp: ____________________", 150, y + 34);
     doc.save(`${learner.admission_number || "cbc-report"}.pdf`);
   };
 
