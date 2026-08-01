@@ -80,6 +80,9 @@ from security_controls import (
     require_same_school as policy_require_same_school,
     safe_filename,
     sha256_hex,
+    hash_one_time_code,
+    sign_media_asset,
+    verify_media_signature,
     validate_magic_bytes,
     verify_totp,
 )
@@ -153,7 +156,11 @@ settings = get_settings()
 # =====================================================
 # FASTAPI APP SETUP
 # =====================================================
-app = FastAPI()
+app = FastAPI(
+    docs_url=None if APP_ENV in {"production", "prod"} else "/docs",
+    redoc_url=None if APP_ENV in {"production", "prod"} else "/redoc",
+    openapi_url=None if APP_ENV in {"production", "prod"} else "/openapi.json",
+)
 
 
 @app.get("/")
@@ -217,14 +224,17 @@ app.add_middleware(
     allow_origins=parse_allowed_origins(allowed_origin_regex),
     allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Request-ID", "X-Trace-ID"],
+    expose_headers=["X-Request-ID", "X-Trace-ID"],
+    max_age=600,
 )
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     started_at = time.perf_counter()
-    request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex}"
+    supplied_request_id = str(request.headers.get("x-request-id") or "")[:128]
+    request_id = supplied_request_id if re.fullmatch(r"[A-Za-z0-9._:-]+", supplied_request_id) else f"req_{uuid.uuid4().hex}"
     trace_id = resolve_trace_id(dict(request.headers))
     request.state.request_id = request_id
     request.state.trace_id = trace_id
@@ -262,6 +272,9 @@ async def add_security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if original_path.startswith("/api/") and not original_path.startswith("/api/media/"):
+        response.headers.setdefault("Cache-Control", "no-store, max-age=0")
+        response.headers.setdefault("Pragma", "no-cache")
     if APP_ENV in {"production", "prod"}:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         response.headers.setdefault(
@@ -1556,15 +1569,17 @@ async def get_school_profile(current_user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/media/{file_asset_id}")
-async def serve_managed_media(file_asset_id: str):
+async def serve_managed_media(file_asset_id: str, sig: Optional[str] = None):
     """Serve immutable uploaded media persisted in Mongo when object storage is unavailable."""
     blob = await db.file_blobs.find_one({"id": file_asset_id}, {"_id": 0})
     if not blob or not blob.get("payload"):
         raise HTTPException(status_code=404, detail="Uploaded file not found")
+    if blob.get("requires_signature") is True and not verify_media_signature(file_asset_id, blob.get("school_id"), str(sig or "")):
+        raise HTTPException(status_code=403, detail="Invalid media signature")
     return Response(
         content=bytes(blob["payload"]),
         media_type=blob.get("content_type") or "application/octet-stream",
-        headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"},
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -1617,9 +1632,11 @@ async def upload_file(
             "payload": payload,
             "size": len(payload),
             "sha256": sha256_hex(payload),
+            "category": upload_category,
+            "requires_signature": True,
             "created_at": now_utc(),
         })
-        url = f"/api/media/{file_asset_id}"
+        url = f"/api/media/{file_asset_id}?sig={sign_media_asset(file_asset_id, school_id)}"
     # Frontends run on different Render origins. Persist a browser-resolvable
     # absolute URL so uploaded media never points at the frontend's /uploads path.
     if str(url).startswith("/"):
@@ -4651,7 +4668,7 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
         "user_id": user.get("id"),
         "email": email,
         "school_id": user.get("school_id"),
-        "code": code,
+        "code_hash": hash_one_time_code(code),
         "expires_at": expires_at,
         "used": False,
         "created_at": now_iso(),
@@ -4697,9 +4714,13 @@ async def reset_password_with_code(request: VerifyResetCodeRequest, http_request
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
 
+    reset_code = str(request.code or "").strip()
     reset_record = await db.password_reset_codes.find_one({
         "user_id": user.get("id"),
-        "code": str(request.code or "").strip(),
+        "$or": [
+            {"code_hash": hash_one_time_code(reset_code)},
+            {"code": reset_code},
+        ],
         "used": False,
     })
     if not reset_record:
@@ -4727,6 +4748,10 @@ async def reset_password_with_code(request: VerifyResetCodeRequest, http_request
     await db.password_reset_codes.update_one(
         {"id": reset_record.get("id")},
         {"$set": {"used": True, "updated_at": now_iso()}}
+    )
+    await db.auth_sessions.update_many(
+        {"user_id": str(user.get("id")), "revoked": {"$ne": True}},
+        {"$set": {"revoked": True, "revoked_at": now_utc(), "revoke_reason": "password_reset", "updated_at": now_utc()}},
     )
     await log_security_event("password_reset_completed", user)
     delivery = await dispatch_notifications(

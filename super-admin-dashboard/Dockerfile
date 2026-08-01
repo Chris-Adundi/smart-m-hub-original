@@ -12,5 +12,6 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 COPY super-admin-dashboard/nginx.conf /etc/nginx/conf.d/default.conf
+COPY super-admin-dashboard/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

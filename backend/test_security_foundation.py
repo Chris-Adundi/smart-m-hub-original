@@ -50,6 +50,12 @@ def test_access_tokens_require_expected_type_and_issuer():
     assert payload["jti"]
 
 
+def test_default_access_token_lifetime_is_short_lived():
+    token = create_access_token({"user_id": "user-1", "role": "teacher", "school_id": "school-1"})
+    payload = decode_token(token)
+    assert payload["exp"] - payload["iat"] <= 60 * 60
+
+
 def test_login_attempt_key_normalizes_email_and_school_code():
     assert login_attempt_key(" Admin@School.COM ", " smh001 ") == "admin@school.com|SMH001"
 

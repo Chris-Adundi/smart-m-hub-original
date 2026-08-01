@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import re
 import time
+import os
 from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException, status
@@ -130,6 +131,28 @@ def safe_filename(filename: Optional[str]) -> str:
 
 def sha256_hex(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def hash_one_time_code(code: str) -> str:
+    return sha256_hex(str(code or "").strip().encode("utf-8"))
+
+
+def verify_one_time_code(code: str, expected_hash: str) -> bool:
+    candidate = hash_one_time_code(code)
+    return bool(expected_hash) and hmac.compare_digest(candidate, str(expected_hash))
+
+
+def sign_media_asset(asset_id: str, school_id: str) -> str:
+    secret = str(os.getenv("SECRET_KEY") or "")
+    if not secret:
+        raise RuntimeError("SECRET_KEY is required to sign media assets")
+    payload = f"{str(asset_id)}:{str(school_id)}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def verify_media_signature(asset_id: str, school_id: str, signature: str) -> bool:
+    expected = sign_media_asset(asset_id, school_id)
+    return bool(signature) and hmac.compare_digest(expected, str(signature))
 
 
 def validate_magic_bytes(payload: bytes, content_type: str) -> None:

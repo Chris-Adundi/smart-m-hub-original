@@ -3,10 +3,14 @@ from fastapi import HTTPException
 
 from security_controls import (
     can_manage_staff,
+    hash_one_time_code,
+    sign_media_asset,
     redact_sensitive,
     require_same_school,
     same_school,
     validate_magic_bytes,
+    verify_one_time_code,
+    verify_media_signature,
 )
 
 
@@ -47,3 +51,19 @@ def test_validate_magic_bytes_rejects_mismatched_file_type():
     validate_magic_bytes(b"%PDF-1.7", "application/pdf")
     with pytest.raises(HTTPException):
         validate_magic_bytes(b"<script>alert(1)</script>", "application/pdf")
+
+
+def test_one_time_codes_are_hashed_and_compared_safely():
+    digest = hash_one_time_code("307582")
+    assert digest != "307582"
+    assert len(digest) == 64
+    assert verify_one_time_code("307582", digest)
+    assert not verify_one_time_code("000000", digest)
+
+
+def test_media_signatures_bind_asset_to_school(monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-that-is-long-enough-for-hmac")
+    signature = sign_media_asset("asset-1", "school-a")
+    assert verify_media_signature("asset-1", "school-a", signature)
+    assert not verify_media_signature("asset-1", "school-b", signature)
+    assert not verify_media_signature("asset-2", "school-a", signature)
