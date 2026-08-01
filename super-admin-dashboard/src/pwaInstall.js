@@ -33,9 +33,15 @@ export const promptPwaInstall = async () => {
   if (isPwaStandalone()) return { outcome: "installed" };
   if (!deferredInstallPrompt) return { outcome: "unavailable" };
   const prompt = deferredInstallPrompt;
-  await prompt.prompt();
-  const choice = await prompt.userChoice;
-  deferredInstallPrompt = null;
-  notify();
-  return choice;
+  try {
+    await prompt.prompt();
+    const choice = await prompt.userChoice;
+    deferredInstallPrompt = null;
+    notify();
+    return choice;
+  } catch (error) {
+    deferredInstallPrompt = null;
+    notify();
+    return { outcome: "error", error };
+  }
 };

@@ -52,21 +52,24 @@ export const amountInWords = (value) => {
 
 const addHeader = async (doc, school, title) => {
   doc.setFillColor(15, 118, 110);
-  doc.rect(0, 0, 210, 37, "F");
+  doc.rect(0, 0, 210, 44, "F");
   if (school.logo_url || school.logo) {
-    try { doc.addImage(await imageData(school.logo_url || school.logo), 14, 6, 24, 24, undefined, "FAST"); } catch { /* optional logo */ }
+    try { doc.addImage(await imageData(school.logo_url || school.logo), 12, 6, 31, 31, undefined, "FAST"); } catch { /* optional logo */ }
   }
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.text(doc.splitTextToSize(text(school.name, "Smart M Hub School"), 145), 43, 12);
+  doc.setFontSize(21);
+  const schoolName = text(school.name, "Smart M Hub School").toUpperCase();
+  const schoolNameLines = doc.splitTextToSize(schoolName, 148).slice(0, 2);
+  doc.text(schoolNameLines, 47, 12);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   const contacts = [school.address, school.phone, school.email].filter(Boolean).join(" | ");
-  if (contacts) doc.text(doc.splitTextToSize(contacts, 150), 43, 21);
+  const contactY = schoolNameLines.length > 1 ? 28 : 22;
+  if (contacts) doc.text(doc.splitTextToSize(contacts, 148).slice(0, 2), 47, contactY);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(title.toUpperCase(), 43, 31);
+  doc.text(title.toUpperCase(), 47, 39);
   doc.setTextColor(17, 24, 39);
 };
 
@@ -87,7 +90,7 @@ const ensureSpace = async (doc, y, needed, school, title) => {
   if (y + needed <= 278) return y;
   doc.addPage();
   await addHeader(doc, school, title);
-  return 46;
+  return 53;
 };
 
 const gradeFor = (average) => average >= 80 ? "EE" : average >= 60 ? "ME" : average >= 40 ? "AE" : "BE";
@@ -97,7 +100,7 @@ export async function downloadAssessmentReportPdf(report, currentUser = {}) {
   const school = report?.school_details || {};
   const learner = report?.learner_details || {};
   await addHeader(doc, school, "Student Assessment Report");
-  let y = 45;
+  let y = 53;
   doc.setFontSize(9.5);
   const meta = [
     ["Academic Year", report?.academic_year], ["Term", report?.term],
@@ -150,10 +153,10 @@ export async function downloadAssessmentReportPdf(report, currentUser = {}) {
   }
   y += 32;
   const comments = [
-    ["Teacher", report?.teacher_name || currentUser.full_name || currentUser.name, report?.teacher_remarks],
-    ["Class Teacher", report?.class_teacher_name, report?.class_teacher_remarks],
-    ["Head Teacher / Principal", report?.principal_name || school.principal_name, report?.principal_remarks],
-  ].filter(([, name, comment]) => name || comment);
+    ["Teacher's Comment", report?.teacher_name || currentUser.full_name || currentUser.name, report?.teacher_remarks || report?.teacher_comments],
+    ["Class Teacher's Comment", report?.class_teacher_name, report?.class_teacher_remarks || report?.class_teacher_comment],
+    ["Headteacher's Comment", report?.principal_name || report?.headteacher_name || school.principal_name, report?.principal_remarks || report?.headteacher_remarks || report?.headteacher_comment],
+  ];
   for (const [label, name, comment] of comments) {
     const lines = doc.splitTextToSize(text(comment), 140);
     y = await ensureSpace(doc, y, Math.max(16, lines.length * 4.5 + 11), school, "Student Assessment Report");
@@ -179,7 +182,7 @@ export async function downloadPaymentReceiptPdf(payment, context = {}) {
     phone: payment?.school_phone, email: payment?.school_email,
   };
   await addHeader(doc, school, "Official Payment Receipt");
-  let y = 46;
+  let y = 53;
   const student = context.student || {};
   const rows = [
     ["Receipt Number", payment?.receipt_number], ["Payment Date & Time", dateTime(payment?.created_at)],

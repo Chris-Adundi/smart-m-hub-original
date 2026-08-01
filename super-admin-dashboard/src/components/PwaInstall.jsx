@@ -17,6 +17,7 @@ export default function PwaInstall() {
     if (!installAvailable) { setShowHelp(true); setMessage("The browser has not offered installation yet, or the dashboard is already installed."); return; }
     const result = await promptPwaInstall();
     if (result.outcome === "accepted") setMessage("Installation accepted. The Super Admin app will appear with your installed apps.");
+    else if (result.outcome === "error") { setShowHelp(true); setMessage("The browser could not open its installation dialog. Follow the browser-menu steps below."); }
     else if (result.outcome === "unavailable") setShowHelp(true);
     else setMessage("Installation was not completed. Click again when you are ready.");
   };
@@ -24,7 +25,8 @@ export default function PwaInstall() {
   return (
     <aside style={panelStyle} aria-label="Install Super Admin Dashboard">
       <div><strong>Smart M Hub - Super Admin</strong><div style={textStyle}>Install this dashboard for direct access from your device.</div></div>
-      <button type="button" style={buttonStyle} onClick={install}>Install Super Admin Now</button>
+      <button type="button" style={buttonStyle} onClick={install}>{installAvailable ? "Install Super Admin Now" : "Show Installation Steps"}</button>
+      {installAvailable && <div style={readyStyle}>Ready to install. One click opens the browser installation prompt.</div>}
       {showHelp && <div style={helpStyle}>{ios() ? "Tap Share, then Add to Home Screen." : "In Chrome or Edge, open the browser menu and choose Install Smart M Hub or Install app. Installation requires HTTPS and is hidden when already installed."}</div>}
       {message && <div style={messageStyle}>{message}</div>}
     </aside>
@@ -36,3 +38,4 @@ const textStyle = { marginTop: 4, color: "#94a3b8", fontSize: 12, lineHeight: 1.
 const buttonStyle = { border: 0, borderRadius: 8, padding: "9px 12px", background: "#2563eb", color: "white", fontWeight: 700, cursor: "pointer" };
 const helpStyle = { color: "#cbd5e1", fontSize: 12 };
 const messageStyle = { color: "#f8fafc", fontSize: 12 };
+const readyStyle = { color: "#86efac", fontSize: 12 };
