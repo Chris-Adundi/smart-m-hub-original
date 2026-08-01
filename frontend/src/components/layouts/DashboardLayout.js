@@ -344,7 +344,7 @@ const DashboardLayout = () => {
             variant="ghost"
             onClick={async () => {
               const result = await promptPwaInstall();
-              if (result.outcome === "unavailable") window.dispatchEvent(new Event("smart-m-hub:install"));
+              if (!["accepted", "installed"].includes(result.outcome)) window.dispatchEvent(new Event("smart-m-hub:install"));
             }}
             className="w-full justify-start"
             title={installAvailable ? "Install Smart M Hub" : "Open installation instructions"}

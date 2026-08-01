@@ -14,6 +14,7 @@ export default function PwaInstallPrompt() {
   const [installAvailable, setInstallAvailable] = useState(hasPwaInstallPrompt);
   const [open, setOpen] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
   const directInstallLink = new URLSearchParams(window.location.search).get("install") === "1";
 
   const presentInstall = useCallback(() => {
@@ -30,6 +31,7 @@ export default function PwaInstallPrompt() {
   useEffect(() => {
     const unsubscribe = subscribeToPwaInstall((available) => {
       setInstallAvailable(available);
+      if (available) setStatusMessage("");
       if (available && (directInstallLink || !localStorage.getItem(DISMISSED_KEY)) && !isPwaStandalone()) {
         window.setTimeout(() => setOpen(true), 1800);
       }
@@ -83,8 +85,17 @@ export default function PwaInstallPrompt() {
   };
 
   const install = async () => {
+    setStatusMessage("");
     const result = await promptPwaInstall();
-    if (result.outcome !== "unavailable") setOpen(false);
+    if (result.outcome === "accepted" || result.outcome === "installed") {
+      setOpen(false);
+      return;
+    }
+    if (result.outcome === "dismissed") {
+      setStatusMessage("Installation was cancelled. Reload this page and click Install when you are ready.");
+      return;
+    }
+    setStatusMessage("Chrome could not open its native install dialog. Click the install icon at the right side of the address bar, or open Chrome menu (three dots) > Cast, save and share > Install Smart M Hub.");
   };
 
   if (!open) return null;
@@ -107,6 +118,7 @@ export default function PwaInstallPrompt() {
             {!showIosHelp && !installAvailable && <p className="text-xs leading-5 text-slate-400">In Chrome or Edge, open the browser menu and choose <strong>Install Smart M Hub</strong> or <strong>Install app</strong>. Installation requires HTTPS and is hidden when the app is already installed.</p>}
             <button type="button" onClick={dismiss} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5">{showIosHelp ? "Got It" : "Not Now"}</button>
           </div>
+          {statusMessage && <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs leading-5 text-amber-100">{statusMessage}</p>}
         </div>
       </div>
     </div>
