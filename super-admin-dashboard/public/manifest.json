@@ -11,8 +11,8 @@
   "background_color": "#070b14",
   "theme_color": "#070b14",
   "icons": [
-    { "src": "/icons/super-admin-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icons/super-admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icons/super-admin-shield-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/super-admin-shield-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ],
   "prefer_related_applications": false
 }

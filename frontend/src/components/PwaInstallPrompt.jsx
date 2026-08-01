@@ -115,7 +115,7 @@ export default function PwaInstallPrompt() {
           )}
           <div className="mt-4 flex gap-3">
             {!showIosHelp && installAvailable && <button type="button" onClick={install} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">Install Smart M Hub</button>}
-            {!showIosHelp && !installAvailable && <p className="text-xs leading-5 text-slate-400">In Chrome or Edge, open the browser menu and choose <strong>Install Smart M Hub</strong> or <strong>Install app</strong>. Installation requires HTTPS and is hidden when the app is already installed.</p>}
+            {!showIosHelp && !installAvailable && <p className="text-xs leading-5 text-slate-400">On Windows, use Chrome/Edge menu → <strong>Apps</strong> or <strong>Cast, save and share</strong> → <strong>Install Smart M Hub</strong>. On Android Chrome, use menu → <strong>Install app</strong> or <strong>Add to Home screen</strong>. On iPhone/iPad Safari, tap Share → <strong>Add to Home Screen</strong>.</p>}
             <button type="button" onClick={dismiss} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5">{showIosHelp ? "Got It" : "Not Now"}</button>
           </div>
           {statusMessage && <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs leading-5 text-amber-100">{statusMessage}</p>}

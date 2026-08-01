@@ -1,9 +1,9 @@
-const CACHE_NAME = "smart-m-hub-super-admin-static-v4";
+const CACHE_NAME = "smart-m-hub-super-admin-static-v5";
 const INSTALL_FILES = [
   "/offline.html",
   "/manifest.json",
-  "/icons/super-admin-192.png",
-  "/icons/super-admin-512.png",
+  "/icons/super-admin-shield-192.png",
+  "/icons/super-admin-shield-512.png",
 ];
 
 self.addEventListener("install", (event) => {

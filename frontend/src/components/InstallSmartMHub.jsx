@@ -37,7 +37,7 @@ export default function InstallSmartMHub() {
       {installAvailable
         ? <p className="mt-3 text-xs leading-5 text-emerald-200">Ready to install. One click opens your browser's secure installation prompt.</p>
         : <p className="mt-3 text-xs leading-5 text-amber-200">The browser has not made native installation available yet. Click for the exact browser steps; this button changes to Install automatically when ready.</p>}
-      <p className="mt-3 text-xs leading-5 text-slate-400">On iPhone or iPad Safari: Tap Share, then Add to Home Screen.</p>
+      <p className="mt-3 text-xs leading-5 text-slate-400">Android Chrome: Menu → Install app. Windows Chrome/Edge: Menu → Apps or Cast, save and share → Install Smart M Hub. iPhone/iPad Safari: Share → Add to Home Screen.</p>
       {message && <p className="mt-3 text-xs leading-5 text-white">{message}</p>}
     </aside>
   );
